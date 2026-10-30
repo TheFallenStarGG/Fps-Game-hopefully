@@ -25,6 +25,9 @@
       position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px;
       border: 2px solid rgba(255,255,255,.85); border-radius: 50%;
     }
+    #cross::after {
+      content: ""; position: absolute; left: 50%; top: 50%; width: 2px; height: 2px; margin: -1px 0 0 -1px; background: #fff;
+    }
     #msg {
       position: absolute; left: 50%; top: 18%; transform: translateX(-50%);
       font-size: 18px; font-weight: 700; text-align: center; max-width: 90vw;
@@ -68,11 +71,11 @@
       align-items: center; justify-content: center; gap: 14px; color: #e8ecf4; z-index: 5; pointer-events: auto;
       padding: 24px; text-align: center;
     }
-    #start h1 { font-size: 1.6rem; }
+    #start h1 { font-size: 1.6rem; letter-spacing: .02em; }
     #start p { max-width: 22rem; opacity: .8; line-height: 1.45; font-size: .95rem; }
     #start button {
       margin-top: 8px; padding: .75rem 1.4rem; border-radius: 999px; border: none;
-      background: #e0b84a; color: #1a1205; font-weight: 800; font-size: 1rem;
+      background: #e0b84a; color: #1a1205; font-weight: 800; font-size: 1rem; cursor: pointer;
     }
   </style>
 </head>
@@ -90,10 +93,12 @@
       </div>
     </div>
     <div id="cross"></div>
+    <div id="ammo" style="position:absolute;right:14px;bottom:calc(110px + env(safe-area-inset-bottom));font-size:15px;font-weight:700;text-align:right"></div>
+    <div id="scopeVignette" style="display:none;position:absolute;inset:0;box-shadow:inset 0 0 80px 40px rgba(0,0,0,.65);pointer-events:none"></div>
     <div id="msg"></div>
     <div id="hint">
-      <span class="pc-only">Click to lock mouse · WASD move · Space jump · Click shoot</span>
-      <span class="mob-only">Left stick move · Right side look · Red button fire</span>
+      <span class="pc-only">WASD move · Space jump · Click shoot · R reload · RMB ADS</span>
+      <span class="mob-only">Stick move · Look · FIRE · JUMP · hold AIM · RELOAD</span>
     </div>
     <div id="mobile">
       <div class="stick-wrap" id="stick">
@@ -101,12 +106,14 @@
       </div>
       <div id="lookZone"></div>
       <button type="button" id="btnJump">JUMP</button>
+      <button type="button" id="btnReload" style="pointer-events:auto;position:absolute;right:104px;bottom:calc(100px + env(safe-area-inset-bottom));width:56px;height:56px;border-radius:50%;border:2px solid rgba(255,255,255,.35);background:rgba(255,255,255,.12);color:#fff;font-size:11px;font-weight:600">RELOAD</button>
+      <button type="button" id="btnAim" style="pointer-events:auto;position:absolute;right:18px;bottom:calc(110px + env(safe-area-inset-bottom));width:64px;height:64px;border-radius:50%;border:2px solid rgba(120,180,255,.7);background:rgba(60,100,180,.35);color:#fff;font-size:12px;font-weight:700">AIM</button>
       <button type="button" id="btnFire">FIRE</button>
     </div>
   </div>
   <div id="start">
     <h1>Realm Range</h1>
-    <p>Flat range, one rifle, one hostile. PC and mobile. Side project for The Overlord.</p>
+    <p>Flat range, one rifle, one hostile. PC and mobile. A tiny Overlord side project.</p>
     <button type="button" id="btnStart">Play</button>
   </div>
 
