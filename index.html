@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>Realm Range — Overlord FPS</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0c10; font-family: system-ui, sans-serif; touch-action: none; }
+    #c { display: block; width: 100%; height: 100%; }
+    #hud {
+      position: fixed; inset: 0; pointer-events: none; color: #e8ecf4;
+      text-shadow: 0 1px 2px #000;
+    }
+    #top {
+      position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 12px; right: 12px;
+      display: flex; justify-content: space-between; gap: 8px; font-size: 14px;
+    }
+    .bar {
+      width: 140px; height: 10px; background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.2); border-radius: 6px; overflow: hidden;
+    }
+    .bar > i { display: block; height: 100%; width: 100%; background: #3dd68c; transform-origin: left center; transform: scaleX(1); }
+    .bar.enemy > i { background: #f07178; }
+    #cross {
+      position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px;
+      border: 2px solid rgba(255,255,255,.85); border-radius: 50%;
+    }
+    #msg {
+      position: absolute; left: 50%; top: 18%; transform: translateX(-50%);
+      font-size: 18px; font-weight: 700; text-align: center; max-width: 90vw;
+    }
+    #hint {
+      position: absolute; bottom: calc(16px + env(safe-area-inset-bottom)); left: 0; right: 0;
+      text-align: center; font-size: 12px; opacity: .75; padding: 0 12px;
+    }
+    #mobile { pointer-events: none; position: absolute; inset: 0; display: none; }
+    body.mobile #mobile { display: block; }
+    body.mobile #hint .pc-only { display: none; }
+    body:not(.mobile) #hint .mob-only { display: none; }
+    .stick-wrap {
+      pointer-events: auto; position: absolute; left: 16px; bottom: calc(20px + env(safe-area-inset-bottom));
+      width: 120px; height: 120px;
+    }
+    .stick-base {
+      width: 100%; height: 100%; border-radius: 50%;
+      background: rgba(255,255,255,.08); border: 2px solid rgba(255,255,255,.2);
+      position: relative;
+    }
+    .stick-knob {
+      position: absolute; left: 50%; top: 50%; width: 54px; height: 54px; margin: -27px 0 0 -27px;
+      border-radius: 50%; background: rgba(255,255,255,.28); border: 2px solid rgba(255,255,255,.4);
+    }
+    #lookZone {
+      pointer-events: auto; position: absolute; right: 0; top: 0; width: 55%; height: 70%;
+    }
+    #btnFire {
+      pointer-events: auto; position: absolute; right: 18px; bottom: calc(28px + env(safe-area-inset-bottom));
+      width: 76px; height: 76px; border-radius: 50%; border: 2px solid rgba(255,80,80,.7);
+      background: rgba(220, 50, 50, .35); color: #fff; font-weight: 700; font-size: 13px;
+    }
+    #btnJump {
+      pointer-events: auto; position: absolute; right: 104px; bottom: calc(36px + env(safe-area-inset-bottom));
+      width: 56px; height: 56px; border-radius: 50%; border: 2px solid rgba(255,255,255,.35);
+      background: rgba(255,255,255,.12); color: #fff; font-size: 12px; font-weight: 600;
+    }
+    #start {
+      position: fixed; inset: 0; background: rgba(6,8,12,.88); display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 14px; color: #e8ecf4; z-index: 5; pointer-events: auto;
+      padding: 24px; text-align: center;
+    }
+    #start h1 { font-size: 1.6rem; }
+    #start p { max-width: 22rem; opacity: .8; line-height: 1.45; font-size: .95rem; }
+    #start button {
+      margin-top: 8px; padding: .75rem 1.4rem; border-radius: 999px; border: none;
+      background: #e0b84a; color: #1a1205; font-weight: 800; font-size: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="hud">
+    <div id="top">
+      <div>
+        <div>You</div>
+        <div class="bar"><i id="hpYou"></i></div>
+      </div>
+      <div style="text-align:right">
+        <div>Target</div>
+        <div class="bar enemy" style="margin-left:auto"><i id="hpEnemy"></i></div>
+      </div>
+    </div>
+    <div id="cross"></div>
+    <div id="msg"></div>
+    <div id="hint">
+      <span class="pc-only">Click to lock mouse · WASD move · Space jump · Click shoot</span>
+      <span class="mob-only">Left stick move · Right side look · Red button fire</span>
+    </div>
+    <div id="mobile">
+      <div class="stick-wrap" id="stick">
+        <div class="stick-base"><div class="stick-knob" id="knob"></div></div>
+      </div>
+      <div id="lookZone"></div>
+      <button type="button" id="btnJump">JUMP</button>
+      <button type="button" id="btnFire">FIRE</button>
+    </div>
+  </div>
+  <div id="start">
+    <h1>Realm Range</h1>
+    <p>Flat range, one rifle, one hostile. PC and mobile. Side project for The Overlord.</p>
+    <button type="button" id="btnStart">Play</button>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.170.0/build/three.module.js"
+    }
+  }
+  </script>
+  <script type="module" src="./game.js"></script>
+</body>
+</html>
