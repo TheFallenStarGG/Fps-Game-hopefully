@@ -45,13 +45,11 @@ const hud = createHud();
 const raycaster = new THREE.Raycaster();
 const keys = new Set();
 const moveStick = { x: 0, y: 0 };
-let rmbDown = false, aimMobile = false, firingMobile = false;
+let firingMobile = false;
 
 const ctrl = createPlayerController({
   THREE, camera, playerMesh, player, keys, moveStick,
   isTouch,
-  getRmb: () => rmbDown,
-  getAimMobile: () => aimMobile,
   getFiringMobile: () => firingMobile,
   bullets, hud, enemy, raycaster,
 });
@@ -61,6 +59,7 @@ function onPlayerHit(dmg) {
   if (player.hp <= 0) {
     player.hp = 0;
     player.alive = false;
+    player.ads = false;
     hud.update(player, enemy);
     hud.setMsg('You were dropped — respawning…', 2000);
     setTimeout(() => ctrl.respawn(), 2000);
@@ -79,9 +78,8 @@ createInput(canvas, {
     ctrl.toggleCamera();
     if (viewmodel) viewmodel.visible = !player.thirdPerson;
   },
+  onToggleAim: () => ctrl.toggleAim(),
   getPlayer: () => player,
-  setRmb: (v) => { rmbDown = v; },
-  setAimMobile: (v) => { aimMobile = v; },
   setFiringMobile: (v) => { firingMobile = v; },
 });
 
@@ -116,8 +114,8 @@ btnStart.addEventListener('click', async () => {
   if (!isTouch) { try { await canvas.requestPointerLock(); } catch (_) {} }
   hud.setMsg(
     isTouch
-      ? 'Stick · look · fire · aim · reload · CAM toggles view'
-      : 'V toggles 1st/3rd · RMB aim · R reload',
+      ? 'Stick · look · fire · AIM toggles · reload · CAM'
+      : 'V cam · RMB toggle aim · R reload',
     2800
   );
 });
