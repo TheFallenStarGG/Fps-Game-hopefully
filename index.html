@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <title>Realm Range — Overlord FPS</title>
+  <title>Realm Range — Multiplayer</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0c10; font-family: system-ui, sans-serif; touch-action: none; }
@@ -58,16 +58,66 @@
       width: 56px; height: 56px; border-radius: 50%; border: 2px solid rgba(255,255,255,.35);
       background: rgba(255,255,255,.12); color: #fff; font-size: 12px; font-weight: 600;
     }
-    #start {
-      position: fixed; inset: 0; background: rgba(6,8,12,.88); display: flex; flex-direction: column;
-      align-items: center; justify-content: center; gap: 14px; color: #e8ecf4; z-index: 5; pointer-events: auto;
-      padding: 24px; text-align: center;
+    #btnCam {
+      pointer-events: auto; position: absolute; left: 16px;
+      bottom: calc(150px + env(safe-area-inset-bottom)); width: 56px; height: 56px; border-radius: 50%;
+      border: 2px solid rgba(224,184,74,.6); background: rgba(224,184,74,.2); color: #ffe9a8;
+      font-size: 11px; font-weight: 700;
     }
-    #start h1 { font-size: 1.6rem; }
-    #start p { max-width: 22rem; opacity: .8; line-height: 1.45; font-size: .95rem; }
-    #start button {
-      margin-top: 8px; padding: .75rem 1.4rem; border-radius: 999px; border: none;
-      background: #e0b84a; color: #1a1205; font-weight: 800; font-size: 1rem;
+    #btnReload {
+      pointer-events: auto; position: absolute; right: 104px;
+      bottom: calc(100px + env(safe-area-inset-bottom)); width: 56px; height: 56px; border-radius: 50%;
+      border: 2px solid rgba(255,255,255,.35); background: rgba(255,255,255,.12); color: #fff;
+      font-size: 11px; font-weight: 600;
+    }
+    #btnAim {
+      pointer-events: auto; position: absolute; right: 18px;
+      bottom: calc(110px + env(safe-area-inset-bottom)); width: 64px; height: 64px; border-radius: 50%;
+      border: 2px solid rgba(120,180,255,.7); background: rgba(60,100,180,.35); color: #fff;
+      font-size: 12px; font-weight: 700;
+    }
+    #lobby {
+      position: fixed; inset: 0; background: rgba(6,8,12,.92); z-index: 20;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 12px; color: #e8ecf4; padding: 24px; text-align: center; pointer-events: auto;
+    }
+    #lobby h1 { font-size: 1.6rem; }
+    #lobby p { opacity: .75; max-width: 22rem; line-height: 1.4; font-size: .95rem; }
+    #lobby input {
+      width: min(280px, 90vw); padding: .65rem .9rem; border-radius: 10px;
+      border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.08); color: #fff; font-size: 1rem;
+    }
+    #lobby .row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+    #lobby button {
+      padding: .7rem 1.2rem; border-radius: 999px; border: none; font-weight: 800; font-size: .95rem; cursor: pointer;
+    }
+    #lobby button.primary { background: #e0b84a; color: #1a1205; }
+    #lobby button.ghost { background: rgba(255,255,255,.12); color: #e8ecf4; }
+    #lobbyStatus { font-size: 13px; opacity: .7; min-height: 1.2em; }
+    #chatWrap {
+      pointer-events: none; position: absolute; left: 12px;
+      bottom: calc(140px + env(safe-area-inset-bottom)); width: min(320px, 70vw);
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    body.mobile #chatWrap { bottom: calc(200px + env(safe-area-inset-bottom)); }
+    #chatLog {
+      max-height: 140px; overflow-y: auto; font-size: 12px; line-height: 1.35;
+      background: rgba(0,0,0,.35); border-radius: 8px; padding: 6px 8px;
+    }
+    #chatLog div { margin-bottom: 2px; word-break: break-word; }
+    #chatLog .sys { opacity: .7; font-style: italic; }
+    #chatLog .name { color: #e0b84a; font-weight: 700; }
+    #chatForm { pointer-events: auto; display: flex; gap: 4px; }
+    #chatInput {
+      flex: 1; padding: 6px 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,.2);
+      background: rgba(0,0,0,.45); color: #fff; font-size: 13px;
+    }
+    #chatSend {
+      padding: 6px 10px; border-radius: 8px; border: none; background: #e0b84a; color: #1a1205; font-weight: 700; font-size: 12px;
+    }
+    #playerList {
+      position: absolute; top: calc(48px + env(safe-area-inset-top)); right: 12px;
+      font-size: 12px; text-align: right; opacity: .9; white-space: pre-line;
     }
   </style>
 </head>
@@ -80,18 +130,26 @@
         <div class="bar"><i id="hpYou"></i></div>
       </div>
       <div style="text-align:right">
-        <div>Target</div>
+        <div id="targetLabel">Target</div>
         <div class="bar enemy" style="margin-left:auto"><i id="hpEnemy"></i></div>
       </div>
     </div>
+    <div id="playerList"></div>
     <div id="cross"></div>
     <div id="camMode" style="position:absolute;left:14px;bottom:calc(110px + env(safe-area-inset-bottom));font-size:13px;font-weight:700;opacity:.9">3RD</div>
     <div id="ammo" style="position:absolute;right:14px;bottom:calc(110px + env(safe-area-inset-bottom));font-size:15px;font-weight:700;text-align:right"></div>
-    <div id="scopeVignette" style="display:none;position:absolute;inset:0;box-shadow:inset 0 0 80px 40px rgba(0,0,0,.65);pointer-events:none"></div>
+    <div id="scopeVignette" style="display:none;position:absolute;inset:0;box-shadow:inset 0 0 100px 50px rgba(0,0,0,.7);pointer-events:none"></div>
     <div id="msg"></div>
+    <div id="chatWrap">
+      <div id="chatLog"></div>
+      <form id="chatForm" autocomplete="off">
+        <input id="chatInput" type="text" maxlength="200" placeholder="Chat… (Enter)" />
+        <button type="submit" id="chatSend">Send</button>
+      </form>
+    </div>
     <div id="hint">
-      <span class="pc-only">WASD · Space · Click shoot · R reload · RMB aim · V toggle 1st/3rd</span>
-      <span class="mob-only">Stick · Look · FIRE · JUMP · AIM · RELOAD · CAM</span>
+      <span class="pc-only">WASD · V cam · RMB aim · R reload · Enter chat · T focus chat</span>
+      <span class="mob-only">Stick · FIRE · AIM · RELOAD · CAM · chat below</span>
     </div>
     <div id="mobile">
       <div class="stick-wrap" id="stick">
@@ -99,17 +157,25 @@
       </div>
       <div id="lookZone"></div>
       <button type="button" id="btnJump">JUMP</button>
-      <button type="button" id="btnCam" style="pointer-events:auto;position:absolute;left:16px;bottom:calc(150px + env(safe-area-inset-bottom));width:56px;height:56px;border-radius:50%;border:2px solid rgba(224,184,74,.6);background:rgba(224,184,74,.2);color:#ffe9a8;font-size:11px;font-weight:700">CAM</button>
-      <button type="button" id="btnReload" style="pointer-events:auto;position:absolute;right:104px;bottom:calc(100px + env(safe-area-inset-bottom));width:56px;height:56px;border-radius:50%;border:2px solid rgba(255,255,255,.35);background:rgba(255,255,255,.12);color:#fff;font-size:11px;font-weight:600">RELOAD</button>
-      <button type="button" id="btnAim" style="pointer-events:auto;position:absolute;right:18px;bottom:calc(110px + env(safe-area-inset-bottom));width:64px;height:64px;border-radius:50%;border:2px solid rgba(120,180,255,.7);background:rgba(60,100,180,.35);color:#fff;font-size:12px;font-weight:700">AIM</button>
+      <button type="button" id="btnCam">CAM</button>
+      <button type="button" id="btnReload">RELOAD</button>
+      <button type="button" id="btnAim">AIM</button>
       <button type="button" id="btnFire">FIRE</button>
     </div>
   </div>
-  <div id="start">
+
+  <div id="lobby">
     <h1>Realm Range</h1>
-    <p>Flat range, rifle, hostile AI. Toggle 1st/3rd person. PC + mobile.</p>
-    <button type="button" id="btnStart">Play</button>
+    <p>Multiplayer FPS + chat. Same room code = same match.</p>
+    <input id="nameInput" type="text" maxlength="20" placeholder="Your name" />
+    <input id="roomInput" type="text" maxlength="24" placeholder="Room code (e.g. cool01)" />
+    <div class="row">
+      <button type="button" class="primary" id="btnJoin">Join room</button>
+      <button type="button" class="ghost" id="btnSolo">Solo (bots)</button>
+    </div>
+    <div id="lobbyStatus"></div>
   </div>
+
   <script type="importmap">
   {
     "imports": {
