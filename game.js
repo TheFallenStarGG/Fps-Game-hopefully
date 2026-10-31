@@ -6,6 +6,7 @@ import { createHud } from './lib/hud.js';
 import { createInput } from './lib/input.js';
 import { createPlayerState, createPlayerController } from './lib/player.js';
 import { createEnemy, updateEnemy } from './lib/enemy.js';
+import { colliders } from './lib/collision.js';
 
 const canvas = document.getElementById('c');
 const startEl = document.getElementById('start');
@@ -92,7 +93,7 @@ function frame(now) {
   const t = now / 1000;
   ctrl.update(dt);
   updateEnemy(dt, t, enemy, player, THREE, bullets, raycaster, hud, onPlayerHit);
-  bullets.update(dt);
+  bullets.update(dt, colliders, 0);
   if (viewmodel) viewmodel.visible = !player.thirdPerson && player.alive;
   renderer.render(scene, camera);
 }
