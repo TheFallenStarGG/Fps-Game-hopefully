@@ -28,7 +28,12 @@ const playerMesh = makeHumanoid(THREE, 0x3d6b9a, 0x1e2a38, true);
 scene.add(playerMesh);
 
 const viewmodel = playerMesh.userData.viewmodel;
-if (viewmodel) camera.add(viewmodel);
+if (viewmodel) {
+  camera.add(viewmodel);
+  viewmodel.visible = false;
+  viewmodel.position.set(0, 0, 0);
+  viewmodel.rotation.set(0, 0, 0);
+}
 
 const enemyMesh = makeHumanoid(THREE, 0x8b2e2e, 0x2a1515, false);
 scene.add(enemyMesh);
@@ -94,7 +99,11 @@ function frame(now) {
   ctrl.update(dt);
   updateEnemy(dt, t, enemy, player, THREE, bullets, raycaster, hud, onPlayerHit);
   bullets.update(dt, colliders, 0);
-  if (viewmodel) viewmodel.visible = !player.thirdPerson && player.alive;
+  if (viewmodel) {
+    const showFp = !player.thirdPerson && player.alive;
+    viewmodel.visible = showFp;
+    if (showFp && viewmodel.parent !== camera) camera.add(viewmodel);
+  }
   renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);
