@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <title>Realm Range</title>
 <style>
-:root { --acc:#ffc247; --bad:#ff4d4d; --ui:#eef2f7; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+:root { --acc:#ffc247; --bad:#ff4d4d; --ui:#eef2f7; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; --sa:env(safe-area-inset-top); --sb:env(safe-area-inset-bottom); }
 * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
 html, body { width:100%; height:100%; overflow:hidden; background:#0a0c10; color:var(--ui);
   font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; touch-action:none; user-select:none; -webkit-user-select:none; }
@@ -15,7 +15,6 @@ button { font:inherit; cursor:pointer; }
 /* ---------- HUD ---------- */
 #hud { position:fixed; inset:0; pointer-events:none; text-shadow:0 1px 3px rgba(0,0,0,.85); }
 #hud > * { position:absolute; }
-
 #dmgFlash { inset:0; background:radial-gradient(ellipse at center, transparent 45%, rgba(190,0,0,.6) 100%); opacity:0; }
 #dmgFlash.on { animation:dmg .55s ease-out; }
 @keyframes dmg { 0% { opacity:1; } 100% { opacity:0; } }
@@ -24,11 +23,13 @@ button { font:inherit; cursor:pointer; }
 @keyframes pulse { 50% { opacity:.45; } }
 #scopeVig { inset:0; box-shadow:inset 0 0 150px 40px rgba(0,0,0,.45); opacity:0; transition:opacity .15s; }
 #scopeVig.on { opacity:1; }
-
+#scope { inset:0; opacity:0; background:radial-gradient(circle at 50% 50%, transparent 0, transparent 33vmin, rgba(0,0,0,.97) 33.6vmin); }
+#scope::before, #scope::after { content:''; position:absolute; background:#000; }
+#scope::before { left:50%; top:calc(50% - 33vmin); width:2px; height:66vmin; margin-left:-1px; }
+#scope::after { top:50%; left:calc(50% - 33vmin); height:2px; width:66vmin; margin-top:-1px; }
 #dmgRing { left:50%; top:50%; width:0; height:0; }
 .wedge { position:absolute; left:0; top:0; width:0; height:0; animation:wedge 1.2s ease-out forwards; }
-.wedge i { position:absolute; left:-46px; top:-170px; width:92px; height:34px;
-  border-radius:50% 50% 0 0 / 100% 100% 0 0; background:linear-gradient(to bottom, rgba(255,60,60,.9), rgba(255,60,60,0)); }
+.wedge i { position:absolute; left:-46px; top:-170px; width:92px; height:34px; border-radius:50% 50% 0 0 / 100% 100% 0 0; background:linear-gradient(to bottom, rgba(255,60,60,.9), rgba(255,60,60,0)); }
 @keyframes wedge { 0% { opacity:1; } 100% { opacity:0; } }
 
 #cross { left:50%; top:50%; width:0; height:0; --g:8px; transition:opacity .15s; }
@@ -39,8 +40,7 @@ button { font:inherit; cursor:pointer; }
 #cross .l { left:calc(-9px - var(--g)); } #cross .r { left:var(--g); }
 #cross .dot { width:2px; height:2px; left:-1px; top:-1px; }
 #cross.ads .t, #cross.ads .b, #cross.ads .l, #cross.ads .r { opacity:0; }
-#cross.hide { opacity:0; }
-
+#cross.hide, #cross.scoped { opacity:0; }
 #hitm { left:50%; top:50%; width:0; height:0; opacity:0; }
 #hitm i { position:absolute; left:0; top:0; width:11px; height:2px; background:#fff; box-shadow:0 0 0 1px rgba(0,0,0,.5); }
 #hitm i:nth-child(1) { transform:translate(-50%,-50%) translate(-11px,-11px) rotate(45deg); }
@@ -60,140 +60,157 @@ button { font:inherit; cursor:pointer; }
 #reloadFill { display:block; height:100%; width:100%; background:var(--acc); transform-origin:left; transform:scaleX(0); }
 
 #msg { left:50%; top:16%; transform:translateX(-50%); font-size:18px; font-weight:700; letter-spacing:.04em; text-align:center; max-width:90vw; }
-
-#respawn { inset:0; display:none; flex-direction:column; align-items:center; justify-content:center;
-  background:radial-gradient(ellipse at center, rgba(60,0,0,.15), rgba(40,0,0,.65)); }
+#banner { left:0; right:0; top:22%; text-align:center; opacity:0; transition:opacity .2s; }
+#banner.on { opacity:1; }
+#bannerTitle { font:900 36px var(--mono); letter-spacing:.2em; }
+#bannerSub { font:800 30px var(--mono); color:var(--acc); margin-top:8px; }
+#respawn { inset:0; display:none; flex-direction:column; align-items:center; justify-content:center; background:radial-gradient(ellipse at center, rgba(60,0,0,.15), rgba(40,0,0,.65)); }
 #respawn.on { display:flex; }
-#respawn .big { font:900 46px/1 var(--mono); letter-spacing:.25em; color:#ff5a5a; }
+#respawnTitle { font:900 44px/1 var(--mono); letter-spacing:.25em; color:#ff5a5a; }
 #respawnCt { margin-top:14px; font:600 18px var(--mono); letter-spacing:.1em; }
 
-#score { top:calc(12px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%); display:flex; gap:18px;
-  font:700 15px var(--mono); padding:5px 16px; background:rgba(0,0,0,.4); border:1px solid rgba(255,255,255,.14); border-radius:4px; }
+#score { top:calc(12px + var(--sa)); left:50%; transform:translateX(-50%); display:flex; gap:18px; font:700 15px var(--mono); padding:5px 16px; background:rgba(0,0,0,.4); border:1px solid rgba(255,255,255,.14); border-radius:4px; }
 #score b { color:var(--acc); }
-
-#killfeed { top:calc(12px + env(safe-area-inset-top)); right:14px; display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
-.kf { background:rgba(0,0,0,.5); padding:4px 10px; border-radius:3px; font-size:13px; display:flex; gap:8px;
-  border-left:3px solid var(--acc); animation:kf .25s ease-out; }
-.kf b.you { color:var(--acc); }
-.kf .ico { opacity:.7; }
+#status { top:calc(48px + var(--sa)); left:50%; transform:translateX(-50%); font:700 12px var(--mono); opacity:.85; white-space:nowrap; }
+#killfeed { top:calc(12px + var(--sa)); right:14px; display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
+.kf { background:rgba(0,0,0,.5); padding:4px 10px; border-radius:3px; font-size:13px; display:flex; gap:8px; border-left:3px solid var(--acc); animation:kf .25s ease-out; }
+.kf b.you { color:var(--acc); } .kf .ico { opacity:.7; }
 @keyframes kf { from { transform:translateX(30px); opacity:0; } }
+#fps { top:calc(12px + var(--sa)); left:14px; font:600 12px var(--mono); opacity:.8; }
+#playerList { top:calc(36px + var(--sa)); left:14px; font-size:12px; white-space:pre-line; opacity:.9; line-height:1.5; }
 
-#fps { top:calc(12px + env(safe-area-inset-top)); left:14px; font:600 12px var(--mono); opacity:.8; }
-#playerList { top:calc(36px + env(safe-area-inset-top)); left:14px; font-size:12px; white-space:pre-line; opacity:.9; line-height:1.5; }
+#board { left:50%; top:50%; transform:translate(-50%,-50%); min-width:min(420px,92vw); background:rgba(8,12,18,.84); border:1px solid rgba(255,255,255,.18); border-radius:8px; padding:12px 16px; display:none; }
+#board.on { display:block; }
+#boardTitle { font:800 14px var(--mono); letter-spacing:.2em; color:var(--acc); margin-bottom:8px; }
+#board table { width:100%; border-collapse:collapse; font-size:14px; }
+#board td { padding:4px 8px; } #board td + td { text-align:right; width:56px; font-family:var(--mono); }
+#board tr.me { background:rgba(255,194,71,.16); }
 
-#vitals { left:18px; bottom:calc(18px + env(safe-area-inset-bottom)); width:230px; }
+#vitals { left:18px; bottom:calc(18px + var(--sb)); width:230px; }
 #hpRow { display:flex; align-items:baseline; gap:8px; }
-#hpNum { font:800 34px/1 var(--mono); }
-#hpLabel { font:700 11px var(--mono); letter-spacing:.2em; opacity:.7; }
+#hpNum { font:800 34px/1 var(--mono); } #hpLabel { font:700 11px var(--mono); letter-spacing:.2em; opacity:.7; }
 #hpBar { height:8px; background:rgba(0,0,0,.5); border:1px solid rgba(255,255,255,.18); overflow:hidden; margin-top:6px; transform:skewX(-14deg); }
 #hpFill { display:block; height:100%; width:100%; background:linear-gradient(90deg,#2fc77d,#6af0ae); transform-origin:left; transition:transform .15s; }
 #hpFill.low { background:linear-gradient(90deg,#d63a3a,#ff7a5c); }
 #stance { font:700 11px var(--mono); letter-spacing:.2em; opacity:.7; margin-top:6px; }
-
-#ammoBox { right:18px; bottom:calc(18px + env(safe-area-inset-bottom)); text-align:right; }
-#ammoCur { font:800 44px/1 var(--mono); }
-#ammoCur.low { color:var(--bad); }
+#ammoBox { right:18px; bottom:calc(18px + var(--sb)); text-align:right; }
+#weaponName { font:800 12px var(--mono); letter-spacing:.14em; color:var(--acc); margin-bottom:2px; }
+#ammoCur { font:800 44px/1 var(--mono); } #ammoCur.low { color:var(--bad); }
 #ammoRes { font:700 20px var(--mono); opacity:.7; margin-left:4px; }
 #pips { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:2px; margin-top:6px; max-width:200px; margin-left:auto; }
-#pips i { width:5px; height:12px; background:var(--acc); transform:skewX(-14deg); }
-#pips i.off { background:rgba(255,255,255,.15); }
+#pips i { width:5px; height:12px; background:var(--acc); transform:skewX(-14deg); } #pips i.off { background:rgba(255,255,255,.15); }
 #camMode { font:700 11px var(--mono); letter-spacing:.2em; opacity:.6; margin-top:6px; }
 
-#chatWrap { left:18px; bottom:calc(92px + env(safe-area-inset-bottom)); width:min(340px,70vw); display:flex; flex-direction:column; gap:6px; }
+#slots { left:50%; bottom:calc(14px + var(--sb)); transform:translateX(-50%); display:flex; gap:6px; pointer-events:auto; z-index:5; }
+.slot { min-width:100px; padding:5px 10px; background:rgba(0,0,0,.45); border:1px solid rgba(255,255,255,.18); border-radius:5px; font:700 11px var(--mono); display:flex; gap:6px; align-items:center; white-space:nowrap; }
+.slot b { color:var(--acc); } .slot.on { background:rgba(255,194,71,.2); border-color:var(--acc); }
+#buildBar { left:50%; bottom:calc(58px + var(--sb)); transform:translateX(-50%); display:none; gap:6px; align-items:center; pointer-events:auto; z-index:5;
+  background:rgba(0,0,0,.55); padding:6px 8px; border-radius:8px; border:1px solid rgba(255,255,255,.2); font:700 12px var(--mono); }
+#buildBar.on { display:flex; }
+.bp, #buildTier { padding:6px 12px; border-radius:5px; border:1px solid rgba(255,255,255,.25); background:rgba(255,255,255,.08); color:#fff; font:700 12px var(--mono); }
+.bp i { opacity:.6; margin-left:4px; font-style:normal; } .bp.on { background:var(--acc); color:#1a1205; }
+#buildMats { color:var(--acc); min-width:36px; text-align:right; } #buildWhy { color:#ff8a8a; }
+#prompt { left:50%; bottom:calc(100px + var(--sb)); transform:translateX(-50%); text-align:center; opacity:0; min-width:260px; max-width:92vw; background:rgba(0,0,0,.58); border:1px solid rgba(255,255,255,.2); border-radius:8px; padding:8px 14px; transition:opacity .12s; }
+#prompt.on { opacity:1; }
+#promptText { font:800 15px var(--mono); } #promptSub { font-size:12px; opacity:.8; margin-top:3px; }
+#promptBar { --w:0%; height:3px; background:rgba(255,255,255,.15); margin-top:6px; display:none; }
+#promptBar.on { display:block; } #promptBar::after { content:''; display:block; height:100%; width:var(--w); background:var(--acc); }
+
+#chatWrap { left:18px; bottom:calc(92px + var(--sb)); width:min(340px,70vw); display:flex; flex-direction:column; gap:6px; pointer-events:auto; }
 #chatLog { max-height:130px; overflow-y:auto; font-size:12px; line-height:1.4; background:rgba(0,0,0,.32); border-radius:6px; padding:6px 8px; opacity:.8; }
-#chatLog:empty { display:none; }
-#chatLog div { margin-bottom:2px; word-break:break-word; user-select:text; }
-#chatLog .sys { opacity:.7; font-style:italic; }
-#chatLog .name { color:var(--acc); font-weight:700; }
+#chatLog:empty { display:none; } #chatLog div { margin-bottom:2px; word-break:break-word; user-select:text; }
+#chatLog .sys { opacity:.7; font-style:italic; } #chatLog .name { color:var(--acc); font-weight:700; }
 #chatForm { display:flex; gap:4px; opacity:0; pointer-events:none; }
 #chatWrap:focus-within #chatForm { opacity:1; pointer-events:auto; }
 #chatInput { flex:1; padding:7px 9px; border-radius:6px; border:1px solid rgba(255,255,255,.25); background:rgba(0,0,0,.6); color:#fff; font-size:13px; user-select:text; }
 #chatSend { padding:7px 12px; border-radius:6px; border:0; background:var(--acc); color:#1a1205; font-weight:800; font-size:12px; }
-
-#hint { left:0; right:0; bottom:calc(10px + env(safe-area-inset-bottom)); text-align:center; font-size:11px; opacity:.7; padding:0 12px;
-  animation:hintfade 1s 16s forwards; }
+#hint { left:0; right:0; bottom:calc(10px + var(--sb)); text-align:center; font-size:11px; opacity:.7; padding:0 12px; animation:hintfade 1s 18s forwards; }
+body[data-mode="multi"] #hint, body[data-mode="bots"] #hint { display:none; }
 @keyframes hintfade { to { opacity:0; } }
+body[data-mode="lobby"] #score, body[data-mode="lobby"] #status, body[data-mode="lobby"] #killfeed, body[data-mode="lobby"] #playerList,
+body[data-mode="bots"] #status, body[data-mode="bots"] #playerList { display:none; }
+body[data-mode="lobby"] #hint { bottom:calc(60px + var(--sb)); }
 
 /* ---------- menus ---------- */
-#lobby, #panel { position:fixed; inset:0; align-items:center; justify-content:center; padding:20px; }
-#lobby { z-index:20; display:flex; background:radial-gradient(ellipse at center, rgba(6,8,12,.55), rgba(6,8,12,.92)); }
-#lobby.hide { display:none; }
+#start, #panel, #loadoutPanel { position:fixed; inset:0; align-items:center; justify-content:center; padding:20px; }
+#start { z-index:20; display:flex; background:radial-gradient(ellipse at center, rgba(6,8,12,.5), rgba(6,8,12,.9)); }
+#start.hide { display:none; }
 #panel { z-index:30; display:none; background:rgba(6,8,12,.72); }
-#panel.on { display:flex; }
-.card { width:min(400px,100%); background:rgba(14,18,24,.9); border:1px solid rgba(255,255,255,.12); border-radius:10px;
-  padding:26px 24px; backdrop-filter:blur(6px); pointer-events:auto; }
-#lobby .card { text-align:center; }
-#panel .card { max-height:92vh; overflow:auto; touch-action:pan-y; }
+#loadoutPanel { z-index:40; display:none; background:rgba(6,8,12,.88); }
+#panel.on, #loadoutPanel.on { display:flex; }
+.card { width:min(400px,100%); background:rgba(14,18,24,.92); border:1px solid rgba(255,255,255,.12); border-radius:10px; padding:26px 24px; backdrop-filter:blur(6px); pointer-events:auto; max-height:94vh; overflow:auto; touch-action:pan-y; }
+#start .card { text-align:center; }
 .card h1 { font:900 30px/1 var(--mono); letter-spacing:.28em; color:var(--acc); }
 .card h2 { font:800 18px var(--mono); letter-spacing:.2em; color:var(--acc); margin-bottom:14px; }
 .card .sub { opacity:.7; font-size:13px; margin:10px 0 18px; line-height:1.4; }
-.card input[type=text] { width:100%; padding:.7rem .9rem; border-radius:6px; border:1px solid rgba(255,255,255,.2);
-  background:rgba(255,255,255,.07); color:#fff; font-size:1rem; margin-bottom:10px; user-select:text; }
+.card input[type=text] { width:100%; padding:.7rem .9rem; border-radius:6px; border:1px solid rgba(255,255,255,.2); background:rgba(255,255,255,.07); color:#fff; font-size:1rem; margin-bottom:10px; user-select:text; }
 .btns { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; justify-content:center; }
 .btns button { flex:1; min-width:100px; padding:.75rem 1rem; border-radius:6px; border:0; font-weight:800; letter-spacing:.06em; }
-.primary { background:var(--acc); color:#1a1205; }
-.ghost { background:rgba(255,255,255,.12); color:var(--ui); }
-#lobbyStatus { min-height:1.3em; margin-top:12px; font-size:13px; opacity:.8; }
-.row { display:flex; align-items:center; gap:10px; margin:10px 0; font-size:14px; }
-.row span { flex:1; }
-.row input[type=range] { flex:1.2; accent-color:var(--acc); }
-.row b { width:52px; text-align:right; font:700 13px var(--mono); color:var(--acc); }
-.row.chk { cursor:pointer; }
-.row.chk input { accent-color:var(--acc); width:18px; height:18px; }
-.keys { margin:14px 0 4px; padding:10px 12px; background:rgba(255,255,255,.05); border-radius:6px; font-size:12px; line-height:1.7; opacity:.85; }
-.keys b { color:var(--acc); font-family:var(--mono); }
-#panel.lobby #btnLeave { display:none; }
+.primary { background:var(--acc); color:#1a1205; } .ghost { background:rgba(255,255,255,.12); color:var(--ui); }
+button:disabled { opacity:.5; }
+.row { display:flex; align-items:center; gap:10px; margin:10px 0; font-size:14px; } .row span { flex:1; }
+.row input[type=range] { flex:1.2; accent-color:var(--acc); } .row b { width:52px; text-align:right; font:700 13px var(--mono); color:var(--acc); }
+.row.chk { cursor:pointer; } .row.chk input { accent-color:var(--acc); width:18px; height:18px; }
+.note { font-size:12px; opacity:.7; margin:10px 0 4px; line-height:1.5; }
+.keys { margin:14px 0 4px; padding:10px 12px; background:rgba(255,255,255,.05); border-radius:6px; font-size:12px; line-height:1.7; opacity:.85; } .keys b { color:var(--acc); font-family:var(--mono); }
+#loadoutPanel .card { width:min(980px,100%); }
+#loadoutGrid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:12px; }
+@media (max-width:720px) { #loadoutGrid { grid-template-columns:1fr; } }
+.lcol h3 { font:800 13px var(--mono); letter-spacing:.2em; color:var(--acc); margin-bottom:8px; }
+.lw { display:block; width:100%; text-align:left; padding:8px 10px; margin-bottom:6px; border-radius:6px; border:1px solid rgba(255,255,255,.14); background:rgba(255,255,255,.06); color:#fff; }
+.lw b { display:block; font-size:13px; } .lw span { font-size:11px; opacity:.75; } .lw.on { border-color:var(--acc); background:rgba(255,194,71,.16); }
 
 /* ---------- touch ---------- */
 #mobile { inset:0; display:none; }
 body.mobile #mobile { display:block; }
-body.mobile #hint { display:none; }
 #moveZone { pointer-events:auto; position:absolute; left:0; bottom:0; width:48%; height:62%; }
 #lookZone { pointer-events:auto; position:absolute; right:0; top:0; width:55%; height:100%; }
-#stickBase { position:fixed; width:110px; height:110px; margin:-55px 0 0 -55px; border-radius:50%;
-  background:rgba(255,255,255,.08); border:2px solid rgba(255,255,255,.25); opacity:0; pointer-events:none; }
+#stickBase { position:fixed; width:110px; height:110px; margin:-55px 0 0 -55px; border-radius:50%; background:rgba(255,255,255,.08); border:2px solid rgba(255,255,255,.25); opacity:0; pointer-events:none; }
 #stickBase.on { opacity:1; }
-#stickKnob { position:absolute; left:50%; top:50%; width:48px; height:48px; margin:-24px; border-radius:50%;
-  background:rgba(255,255,255,.3); border:2px solid rgba(255,255,255,.5); }
-.mb { pointer-events:auto; position:absolute; border-radius:50%; border:2px solid rgba(255,255,255,.38);
-  background:rgba(255,255,255,.12); color:#fff; font-weight:700; font-size:11px; letter-spacing:.04em; }
+#stickKnob { position:absolute; left:50%; top:50%; width:48px; height:48px; margin:-24px; border-radius:50%; background:rgba(255,255,255,.3); border:2px solid rgba(255,255,255,.5); }
+.mb { pointer-events:auto; position:absolute; border-radius:50%; border:2px solid rgba(255,255,255,.38); background:rgba(255,255,255,.12); color:#fff; font-weight:700; font-size:10px; letter-spacing:.03em; z-index:4; }
 .mb.down, .mb.on { background:rgba(255,194,71,.45); border-color:var(--acc); }
-#btnFire { right:22px; bottom:calc(34px + env(safe-area-inset-bottom)); width:86px; height:86px; border-color:rgba(255,90,90,.8); background:rgba(220,50,50,.35); font-size:13px; }
-#btnAim { right:120px; bottom:calc(40px + env(safe-area-inset-bottom)); width:64px; height:64px; border-color:rgba(120,180,255,.8); background:rgba(60,100,180,.35); }
-#btnJump { right:30px; bottom:calc(136px + env(safe-area-inset-bottom)); width:56px; height:56px; }
-#btnReload { right:100px; bottom:calc(122px + env(safe-area-inset-bottom)); width:52px; height:52px; }
-#btnCrouch { right:162px; bottom:calc(116px + env(safe-area-inset-bottom)); width:52px; height:52px; }
-#btnCam { right:34px; bottom:calc(200px + env(safe-area-inset-bottom)); width:44px; height:44px; border-color:rgba(255,194,71,.7); }
-#btnPause { right:14px; top:calc(96px + env(safe-area-inset-top)); width:38px; height:38px; font-size:14px; }
-body.mobile #vitals { bottom:auto; top:calc(10px + env(safe-area-inset-top)); left:12px; width:150px; }
-body.mobile #hpNum { font-size:22px; }
-body.mobile #ammoBox { bottom:auto; top:calc(48px + env(safe-area-inset-top)); right:12px; }
-body.mobile #ammoCur { font-size:28px; }
-body.mobile #pips, body.mobile #camMode, body.mobile #stance, body.mobile #playerList { display:none; }
-body.mobile #score { top:calc(10px + env(safe-area-inset-top)); }
-body.mobile #killfeed { top:calc(10px + env(safe-area-inset-top)); right:12px; }
-body.mobile #chatWrap { left:12px; bottom:auto; top:calc(70px + env(safe-area-inset-top)); width:46vw; }
-body.mobile #chatLog { max-height:80px; }
+#btnFire { right:22px; bottom:calc(34px + var(--sb)); width:86px; height:86px; border-color:rgba(255,90,90,.8); background:rgba(220,50,50,.35); font-size:13px; }
+#btnAim { right:120px; bottom:calc(40px + var(--sb)); width:64px; height:64px; border-color:rgba(120,180,255,.8); background:rgba(60,100,180,.35); }
+#btnJump { right:30px; bottom:calc(136px + var(--sb)); width:56px; height:56px; }
+#btnReload { right:100px; bottom:calc(122px + var(--sb)); width:52px; height:52px; }
+#btnCrouch { right:162px; bottom:calc(116px + var(--sb)); width:52px; height:52px; }
+#btnSwap { right:22px; bottom:calc(204px + var(--sb)); width:48px; height:48px; }
+#btnMelee { right:84px; bottom:calc(190px + var(--sb)); width:48px; height:48px; }
+#btnBuild { right:146px; bottom:calc(180px + var(--sb)); width:48px; height:48px; border-color:rgba(93,255,154,.7); }
+#btnUse { right:208px; bottom:calc(166px + var(--sb)); width:48px; height:48px; border-color:rgba(255,194,71,.7); }
+#btnCam { left:60px; top:calc(70px + var(--sa)); width:38px; height:38px; }
+#btnPause { left:14px; top:calc(70px + var(--sa)); width:38px; height:38px; font-size:14px; }
+body.mobile #vitals { bottom:auto; top:calc(10px + var(--sa)); left:12px; width:150px; }
+body.mobile #hpNum { font-size:22px; } body.mobile #ammoBox { bottom:auto; top:calc(48px + var(--sa)); right:12px; } body.mobile #ammoCur { font-size:28px; }
+body.mobile #pips, body.mobile #camMode, body.mobile #stance, body.mobile #playerList, body.mobile #hint { display:none; }
+body.mobile #score { top:calc(10px + var(--sa)); } body.mobile #killfeed { top:calc(10px + var(--sa)); right:12px; }
+body.mobile #status { top:calc(44px + var(--sa)); }
+body.mobile #slots { bottom:auto; top:calc(70px + var(--sa)); left:50%; } body.mobile .slot { min-width:0; padding:4px 8px; }
+body.mobile #prompt { bottom:auto; top:calc(110px + var(--sa)); }
+body.mobile #buildBar { bottom:calc(130px + var(--sb)); }
+body.mobile #chatWrap { left:12px; bottom:auto; top:calc(116px + var(--sa)); width:44vw; } body.mobile #chatLog { max-height:70px; }
 body.mobile #chatForm { opacity:1; pointer-events:auto; }
 </style>
 </head>
-<body>
+<body data-mode="lobby">
 <canvas id="c"></canvas>
 
 <div id="hud">
-  <div id="dmgFlash"></div>
-  <div id="lowHp"></div>
-  <div id="scopeVig"></div>
-  <div id="dmgRing"></div>
+  <div id="scope"></div>
+  <div id="dmgFlash"></div><div id="lowHp"></div><div id="scopeVig"></div><div id="dmgRing"></div>
   <div id="cross"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><i class="dot"></i></div>
   <div id="hitm"><i></i><i></i><i></i><i></i></div>
   <div id="reloadWrap"><div id="reloadLabel">RELOADING</div><div id="reloadBar"><i id="reloadFill"></i></div></div>
   <div id="msg"></div>
-  <div id="respawn"><div class="big">YOU DIED</div><div id="respawnCt"></div></div>
+  <div id="banner"><div id="bannerTitle"></div><div id="bannerSub"></div></div>
+  <div id="respawn"><div id="respawnTitle"></div><div id="respawnCt"></div></div>
   <div id="score"><span>K <b id="kills">0</b></span><span>D <b id="deaths">0</b></span></div>
+  <div id="status"></div>
   <div id="killfeed"></div>
   <div id="fps"></div>
   <div id="playerList"></div>
+  <div id="board"><div id="boardTitle">SCOREBOARD</div><table><tbody id="boardBody"></tbody></table></div>
 
   <div id="vitals">
     <div id="hpRow"><div id="hpNum">100</div><div id="hpLabel">HEALTH</div></div>
@@ -201,10 +218,20 @@ body.mobile #chatForm { opacity:1; pointer-events:auto; }
     <div id="stance"></div>
   </div>
   <div id="ammoBox">
+    <div id="weaponName"></div>
     <div><span id="ammoCur">30</span><span id="ammoRes">/ 120</span></div>
     <div id="pips"></div>
     <div id="camMode">1ST PERSON</div>
   </div>
+  <div id="slots"></div>
+  <div id="buildBar">
+    <button type="button" class="bp" data-p="0">WALL<i>1</i></button>
+    <button type="button" class="bp" data-p="1">FLOOR<i>2</i></button>
+    <button type="button" class="bp" data-p="2">RAMP<i>3</i></button>
+    <button type="button" id="buildTier">Wood</button>
+    <span id="buildMats">0</span><span id="buildWhy"></span>
+  </div>
+  <div id="prompt"><div id="promptText"></div><div id="promptSub"></div><div id="promptBar"></div></div>
 
   <div id="chatWrap">
     <div id="chatLog"></div>
@@ -213,8 +240,7 @@ body.mobile #chatForm { opacity:1; pointer-events:auto; }
       <button type="submit" id="chatSend">Send</button>
     </form>
   </div>
-
-  <div id="hint">WASD move · Shift sprint · C crouch · Space jump · RMB aim · R reload · V camera · T chat · Esc menu</div>
+  <div id="hint">WASD move · Shift sprint · C crouch · Space jump · RMB aim · R reload · 1-3 weapons · F melee · Q build · E use · V camera · Tab board · Esc menu</div>
 
   <div id="mobile">
     <div id="moveZone"></div>
@@ -225,44 +251,57 @@ body.mobile #chatForm { opacity:1; pointer-events:auto; }
     <button type="button" class="mb" id="btnJump">JUMP</button>
     <button type="button" class="mb" id="btnReload">RELOAD</button>
     <button type="button" class="mb" id="btnCrouch">CROUCH</button>
+    <button type="button" class="mb" id="btnSwap">SWAP</button>
+    <button type="button" class="mb" id="btnMelee">MELEE</button>
+    <button type="button" class="mb" id="btnBuild">BUILD</button>
+    <button type="button" class="mb" id="btnUse">USE</button>
     <button type="button" class="mb" id="btnCam">CAM</button>
     <button type="button" class="mb" id="btnPause">II</button>
   </div>
 </div>
 
-<div id="lobby">
+<div id="start">
   <div class="card">
     <h1>REALM RANGE</h1>
-    <p class="sub">Tactical FPS with room chat.<br />Same room code = same match.</p>
+    <p class="sub">Tactical FPS · 15 weapons · build anywhere.<br />Spawn in the lobby, pick a loadout, walk into a portal.</p>
     <input id="nameInput" type="text" maxlength="20" placeholder="Callsign" />
-    <input id="roomInput" type="text" maxlength="24" placeholder="Room code (e.g. cool01)" />
+    <div class="btns"><button type="button" class="primary" id="btnStart" disabled>Loading…</button></div>
     <div class="btns">
-      <button type="button" class="primary" id="btnJoin">Join room</button>
-      <button type="button" class="ghost" id="btnSolo">Solo vs bots</button>
+      <button type="button" class="ghost" id="btnLoadoutStart">Loadout</button>
+      <button type="button" class="ghost" id="btnSettingsStart">Settings</button>
     </div>
-    <div class="btns"><button type="button" class="ghost" id="btnSettings">Settings &amp; controls</button></div>
-    <div id="lobbyStatus"></div>
   </div>
 </div>
 
 <div id="panel">
   <div class="card">
-    <h2>SETTINGS</h2>
+    <h2>MENU</h2>
     <label class="row"><span>Look sensitivity</span><input id="setSens" type="range" min="0.3" max="3" step="0.05" /><b id="setSensVal"></b></label>
     <label class="row"><span>Field of view</span><input id="setFov" type="range" min="60" max="110" step="1" /><b id="setFovVal"></b></label>
     <label class="row"><span>Volume</span><input id="setVol" type="range" min="0" max="1" step="0.01" /><b id="setVolVal"></b></label>
     <label class="row chk"><input id="setAdsToggle" type="checkbox" /><span>Toggle aim (off = hold)</span></label>
     <label class="row chk"><input id="setInvert" type="checkbox" /><span>Invert Y axis</span></label>
     <label class="row chk"><input id="setFps" type="checkbox" /><span>Show FPS</span></label>
+    <div class="note">Private room: type a code and the online portals join exactly that room (friends use the same code). Leave empty for matchmaking.</div>
+    <input id="roomInput" type="text" maxlength="24" placeholder="Private room code (optional)" />
     <div class="keys">
-      <b>WASD</b> move · <b>Shift</b> sprint · <b>C</b> crouch (hold) · <b>Space</b> jump<br />
-      <b>Mouse</b> look · <b>LMB</b> fire · <b>RMB</b> aim down sights · <b>R</b> reload<br />
-      <b>V</b> first / third person · <b>T</b> or <b>Enter</b> chat · <b>Esc</b> menu
+      <b>WASD</b> move · <b>Shift</b> sprint · <b>C</b> crouch · <b>Space</b> jump (fists: double jump)<br />
+      <b>LMB</b> fire · <b>RMB</b> aim / throw tomahawk · <b>R</b> reload · <b>1 2 3</b> / scroll weapons · <b>F</b> melee<br />
+      <b>Q</b> build · <b>1 2 3</b> piece · <b>G</b> material · <b>E</b> use · <b>V</b> camera · <b>Tab</b> board · <b>T</b> chat
     </div>
     <div class="btns">
       <button type="button" class="primary" id="btnResume">Resume</button>
-      <button type="button" class="ghost" id="btnLeave">Leave match</button>
+      <button type="button" class="ghost" id="btnLoadout">Loadout</button>
+      <button type="button" class="ghost" id="btnLobby">Return to lobby</button>
     </div>
+  </div>
+</div>
+
+<div id="loadoutPanel">
+  <div class="card">
+    <h2>LOADOUT</h2>
+    <div id="loadoutGrid"></div>
+    <div class="btns"><button type="button" class="primary" id="btnLoadoutDone">Done</button></div>
   </div>
 </div>
 
@@ -276,10 +315,7 @@ body.mobile #chatForm { opacity:1; pointer-events:auto; }
     box.textContent += t + '\n\n';
   }
   addEventListener('error', function (e) {
-    if (e.target && e.target !== window && e.target.tagName) {
-      show('Failed to load: ' + (e.target.src || e.target.href || e.target.tagName));
-      return;
-    }
+    if (e.target && e.target !== window && e.target.tagName) { show('Failed to load: ' + (e.target.src || e.target.href || e.target.tagName)); return; }
     show((e.message || 'Error') + '\n' + String(e.filename || '').split('/').slice(-2).join('/') + ':' + e.lineno + ':' + e.colno);
   }, true);
   addEventListener('unhandledrejection', function (e) {
@@ -287,7 +323,6 @@ body.mobile #chatForm { opacity:1; pointer-events:auto; }
   });
 })();
 </script>
-  
 <script type="importmap">
 {
   "imports": {
