@@ -1,4 +1,4 @@
-/** Realm Range — bootstrap: renderer (world pass + viewmodel pass), solo bots, multiplayer remotes, menus */
+/** Realm Range: bootstrap. Renderer (world pass + viewmodel pass), lobby, bot arena, online modes, menus. */
 import * as THREE from 'three';
 import { settings, saveSettings } from './lib/settings.js';
 import { createTextures } from './lib/textures.js';
@@ -10,20 +10,26 @@ import { createHud } from './lib/hud.js';
 import { createInput } from './lib/input.js';
 import { createPlayerState, createPlayerController } from './lib/player.js';
 import { createEnemy, updateEnemy, respawnEnemy } from './lib/enemy.js';
-import { updateHumanoidAnim, triggerShootKick } from './lib/anim.js';
+import { updateHumanoidAnim, triggerShootKick, triggerMelee, ensureWeapon } from './lib/anim.js';
+import { createBuild } from './lib/build.js';
+import { createLobby, LOBBY_SPAWN } from './lib/lobby.js';
+import { createMatch, MODES } from './lib/modes.js';
+import { loadout, setSlot, loadoutString } from './lib/loadout.js';
+import { ALL, SLOTS, bySlot, reloadDuration } from './lib/arsenal.js';
 import { createNet, WORKER_URL } from './lib/net.js';
+
+// let the loading card paint before the big map is built
+await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 30)));
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('c');
-const lobby = $('lobby'), panel = $('panel');
-const btnJoin = $('btnJoin'), btnSolo = $('btnSolo'), btnSettings = $('btnSettings');
-const btnResume = $('btnResume'), btnLeave = $('btnLeave'), btnPause = $('btnPause');
-const nameInput = $('nameInput'), roomInput = $('roomInput'), lobbyStatus = $('lobbyStatus');
+const startEl = $('start'), panel = $('panel'), loadoutPanel = $('loadoutPanel');
+const nameInput = $('nameInput'), roomInput = $('roomInput');
+const btnStart = $('btnStart'), btnResume = $('btnResume'), btnLobby = $('btnLobby'), btnLoadout = $('btnLoadout');
 const chatLog = $('chatLog'), chatForm = $('chatForm'), chatInput = $('chatInput'), playerListEl = $('playerList');
 
 const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (isTouch) document.body.classList.add('mobile');
-
 const store = {
   get: (k, d) => { try { return localStorage.getItem(k) ?? d; } catch (_) { return d; } },
   set: (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} },
@@ -31,14 +37,15 @@ const store = {
 nameInput.value = store.get('rr.name', '');
 roomInput.value = store.get('rr.room', '');
 
-let mode = 'solo', running = false, panelOpen = false;
-let myName = 'Player', currentRoom = 'lobby';
-let last = performance.now(), fpsT = 0, fpsN = 0, listT = 0;
+let where = 'lobby'; // 'lobby' | 'bots' | 'multi'
+let running = false, panelOpen = false, loadoutOpen = false, joining = false;
+let myName = 'Player', last = performance.now(), fpsT = 0, fpsN = 0, listT = 0;
 const chatFocused = () => document.activeElement === chatInput;
 const lockPointer = () => { if (!isTouch) { try { canvas.requestPointerLock(); } catch (_) {} } };
+const isMulti = () => where === 'multi';
 
 // ---------- renderer / world ----------
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isTouch, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, isTouch ? 1.5 : 2));
 renderer.setSize(innerWidth, innerHeight, false);
 renderer.shadowMap.enabled = true;
@@ -51,10 +58,11 @@ const audio = createAudio(settings);
 audio.setVolume(settings.volume);
 const world = createWorld(renderer, tex);
 const scene = world.scene;
+if (isTouch) world.sun.shadow.mapSize.set(1024, 1024);
 const camera = new THREE.PerspectiveCamera(settings.fov, innerWidth / innerHeight, 0.05, 400);
 scene.add(camera);
 
-// viewmodel renders in its own scene with a fixed FOV (no growing gun when aiming, no wall clipping)
+// the viewmodel renders in its own scene with a fixed FOV (no growing gun when aiming, no wall clipping)
 const vmScene = new THREE.Scene();
 vmScene.environment = scene.environment;
 vmScene.environmentIntensity = 0.9;
@@ -65,6 +73,7 @@ vmScene.add(vmSun);
 const vmCamera = new THREE.PerspectiveCamera(58, innerWidth / innerHeight, 0.01, 10);
 
 const hud = createHud();
+const match = createMatch();
 const bullets = createBulletSystem(scene, tex, {
   onLand: (kind, x, y, z) => audio.play(kind === 'mag' ? 'magDrop' : 'shell', x, z),
   onWhiz: () => audio.play('whiz'),
@@ -76,129 +85,101 @@ scene.add(playerMesh);
 const viewmodel = makeViewmodel(tex);
 viewmodel.visible = false;
 vmScene.add(viewmodel);
-
 const player = createPlayerState();
 const enemies = [];
 const remotes = new Map();
+let ctrl = null;
 
-// ---------- input + controller ----------
-const input = createInput(canvas, {
-  isTouch,
-  getPlayer: () => player,
-  isActive: () => running && !panelOpen && !chatFocused(),
-  onReload: () => ctrl.startReload(),
-  onToggleCamera: () => ctrl.toggleCamera(),
-  onAim: (down) => ctrl.setAim(down),
-});
-
-const ctrl = createPlayerController({
-  camera, playerMesh, viewmodel, player, input, bullets, hud, audio,
-  getEnemies: () => (mode === 'solo' ? enemies : []),
-  getRemotes: () => remotes,
-  isMulti: () => mode === 'multi',
-  onLocalShoot: (i) => {
-    if (!net.isConnected()) return;
-    net.sendShoot({
-      ox: i.origin.x, oy: i.origin.y, oz: i.origin.z,
-      dx: i.dir.x, dy: i.dir.y, dz: i.dir.z,
-      targetId: i.targetId || null, dmg: i.dmg,
-    });
-  },
-});
-
-// ---------- solo bots ----------
-const enemyCtx = {
-  bullets, audio, hud, player, enemies,
-  onPlayerHit: (dmg, sx, sz, zone, name) => {
-    if (mode === 'solo' && running) ctrl.applyDamage(dmg, sx, sz, name);
-  },
-};
-for (let i = 0; i < 3; i++) {
-  const m = makeHumanoid(tex, 'enemy');
-  m.visible = false;
-  scene.add(m);
-  enemies.push(createEnemy(m, enemyCtx, i));
-  m.visible = false;
-}
-function setEnemiesActive(on) {
-  for (const e of enemies) {
-    if (on) respawnEnemy(e);
-    else e.mesh.visible = false;
-  }
+// ---------- multiplayer remotes ----------
+function makeTag(name, color) {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 64;
+  const x = c.getContext('2d');
+  x.fillStyle = 'rgba(0,0,0,.45)'; x.fillRect(0, 8, 256, 48);
+  x.font = '700 30px system-ui, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillStyle = color; x.fillText(name, 128, 33, 240);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthWrite: false, fog: false }));
+  s.scale.set(1.5, 0.375, 1);
+  s.position.y = 2.25;
+  return s;
 }
 
-// ---------- multiplayer ----------
 function addRemote(p) {
   if (!p || remotes.has(p.id)) return;
   const mesh = makeHumanoid(tex, 'remote');
   scene.add(mesh);
-  const x = p.x || 0, z = p.z || 0, yaw = p.yaw || 0;
-  mesh.position.set(x, 0, z);
+  const col = match.cfg.teams ? (p.team && p.team === match.team ? '#4aa8ff' : '#ff6b4a') : '#ffffff';
+  const tag = makeTag(p.name || 'Player', col);
+  mesh.add(tag);
+  const x = p.x || 0, y = p.y || 0, z = p.z || 0, yaw = p.yaw || 0;
+  mesh.position.set(x, y, z);
   remotes.set(p.id, {
-    id: p.id, mesh, name: p.name || 'Player',
-    x, z, tx: x, tz: z, px: x, pz: z, yaw, tyaw: yaw, pitch: p.pitch || 0,
-    hp: p.hp ?? 100, alive: p.alive !== false, ads: !!p.ads, speed: 0,
-    flash: bullets.attachFlash(mesh.userData.muzzle, 0.55),
+    id: p.id, mesh, tag, name: p.name || 'Player', team: p.team || null,
+    x, y, z, tx: x, ty: y, tz: z, px: x, pz: z, yaw, tyaw: yaw, pitch: p.pitch || 0,
+    hp: p.hp ?? 100, alive: p.alive !== false, ads: !!p.ads, crouch: !!p.crouch, sprint: !!p.sprint,
+    rl: !!p.rl, wasRl: false, rlT: 0, weapon: p.weapon || 'vanguard', speed: 0, flashes: {},
   });
 }
 function removeRemote(id) {
   const r = remotes.get(id);
   if (!r) return;
   scene.remove(r.mesh);
+  r.tag.material.map.dispose();
+  r.tag.material.dispose();
   remotes.delete(id);
 }
-function clearRemotes() {
-  for (const id of [...remotes.keys()]) removeRemote(id);
+function clearRemotes() { for (const id of [...remotes.keys()]) removeRemote(id); }
+
+function remoteFlash(r, id) {
+  return r.flashes[id] || (r.flashes[id] = bullets.attachFlash(ensureWeapon(r.mesh.userData, id).muzzle, 0.55));
+}
+const _v = new THREE.Vector3();
+function remoteEvent(r, name, info) {
+  if (name === 'toss' && info) bullets.dropMag(info.pos, _v.set(-1.5, 1, 0.3));
+  else if (name === 'eject' && info) bullets.ejectShell(info.pos, _v.set(1.2, 1.2, 0));
+  else if (name === 'swing') audio.play('swing', r.x, r.z);
+  else if (!['toss', 'eject', 'meleeHit', 'throwStart', 'throwRelease'].includes(name)) audio.play(name, r.x, r.z);
 }
 
 function updateRemotes(dt) {
   for (const r of remotes.values()) {
-    const dx = r.tx - r.x, dz = r.tz - r.z;
-    if (Math.hypot(dx, dz) > 8) { r.x = r.tx; r.z = r.tz; }
-    else { const k = Math.min(1, dt * 14); r.x += dx * k; r.z += dz * k; }
-    let dy = r.tyaw - r.yaw;
-    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-    r.yaw += dy * Math.min(1, dt * 14);
+    const dx = r.tx - r.x, dz = r.tz - r.z, dy = r.ty - r.y;
+    if (Math.hypot(dx, dz, dy) > 8) { r.x = r.tx; r.y = r.ty; r.z = r.tz; }
+    else { const k = Math.min(1, dt * 14); r.x += dx * k; r.y += dy * k; r.z += dz * k; }
+    r.yaw += Math.atan2(Math.sin(r.tyaw - r.yaw), Math.cos(r.tyaw - r.yaw)) * Math.min(1, dt * 14);
     const sp = Math.hypot(r.x - r.px, r.z - r.pz) / Math.max(dt, 1e-3);
     r.px = r.x; r.pz = r.z;
     r.speed += (Math.min(sp, 12) - r.speed) * Math.min(1, dt * 8);
-    r.mesh.position.set(r.x, 0, r.z);
+    const wid = ALL[r.weapon] ? r.weapon : 'vanguard', def = ALL[wid];
+    if (r.rl && !r.wasRl) r.rlT = 0;
+    r.wasRl = r.rl;
+    if (r.rl) r.rlT += dt;
+    r.mesh.position.set(r.x, r.y, r.z);
     r.mesh.rotation.y = r.yaw;
+    r.tag.visible = r.alive;
     updateHumanoidAnim(r.mesh.userData, {
-      dt, moving: r.speed > 0.4, speed: r.speed, grounded: true, ads: r.ads, sprint: r.speed > 7,
-      crouch: false, pitch: r.pitch, reloading: false, dead: !r.alive,
+      dt, moving: r.speed > 0.4, speed: r.speed, grounded: true, ads: r.ads, sprint: r.sprint, crouch: r.crouch,
+      pitch: r.pitch, reloading: r.rl && def.kind === 'gun', reloadT: r.rlT, missing: def.mag || 1, ammo: 1,
+      weapon: wid, dead: !r.alive,
+      onEvent: (n, i) => remoteEvent(r, n, i),
       onStep: () => audio.play('step', r.x, r.z, { vol: 0.6 }),
     });
   }
 }
 
 function refreshPlayerList() {
-  if (mode !== 'multi') { playerListEl.textContent = ''; return; }
+  if (!isMulti()) { playerListEl.textContent = ''; return; }
   const lines = [`You — ${Math.round(player.hp)} hp`];
   for (const r of remotes.values()) lines.push(`${r.name} — ${r.alive ? Math.round(r.hp) + ' hp' : 'down'}`);
   playerListEl.textContent = lines.join('\n');
 }
 
-function onKillMsg(k, v) {
-  hud.addKill(k === myName ? 'You' : k, v === myName ? 'You' : v, false);
-  if (k === myName && v !== myName) {
-    player.kills++;
-    hud.setScore(player.kills, player.deaths);
-    hud.hitMarker('kill');
-    audio.play('kill');
-  }
-}
-
-function appendChat(msg, quiet) {
+function appendChat(msg) {
   const div = document.createElement('div');
-  if (msg.id === 'system' || msg.name === 'System') {
-    div.className = 'sys';
-    div.textContent = msg.text;
-    if (!quiet) {
-      const m = /^(.+) eliminated (.+)$/.exec(msg.text);
-      if (m) onKillMsg(m[1], m[2]);
-    }
-  } else {
+  if (msg.id === 'system' || msg.name === 'System') { div.className = 'sys'; div.textContent = msg.text; }
+  else {
     const n = document.createElement('span');
     n.className = 'name';
     n.textContent = msg.name;
@@ -209,38 +190,56 @@ function appendChat(msg, quiet) {
   chatLog.scrollTop = chatLog.scrollHeight;
 }
 
+// ---------- network ----------
+let build = null;
 const net = createNet({
   onWelcome(msg) {
-    lobbyStatus.textContent = 'Connected';
-    startRun();
+    where = 'multi';
+    joining = false;
+    lobby.setActive(false);
+    for (const e of enemies) e.mesh.visible = false;
+    build.clear();
+    player.canBuild = true;
+    match.begin(msg.mode);
+    match.apply(msg);
+    clearRemotes();
     for (const p of msg.players || []) addRemote(p);
     chatLog.textContent = '';
-    for (const c of msg.chat || []) appendChat(c, true);
+    for (const c of msg.chat || []) appendChat(c);
+    for (const spec of msg.builds || []) build.placeRemote(spec);
     player.kills = player.deaths = 0;
     hud.setScore(0, 0);
-    ctrl.respawn();
+    ctrl.respawnAt(msg.spawn);
     net.startStateLoop(() => player);
-    hud.setMsg(`Room “${currentRoom}” — fight + chat`, 2500);
-    lockPointer();
+    hud.setMode('multi');
+    hud.setMsg(match.cfg.name, 2200);
     refreshPlayerList();
+    lockPointer();
   },
   onJoin(p) { addRemote(p); refreshPlayerList(); },
   onLeave(id) { removeRemote(id); refreshPlayerList(); },
   onState(msg) {
     const r = remotes.get(msg.id);
     if (!r) return;
-    r.tx = msg.x; r.tz = msg.z; r.tyaw = msg.yaw; r.pitch = msg.pitch || 0;
-    r.hp = msg.hp; r.alive = msg.alive; r.ads = !!msg.ads;
+    r.tx = msg.x; r.ty = msg.y || 0; r.tz = msg.z; r.tyaw = msg.yaw; r.pitch = msg.pitch || 0;
+    r.hp = msg.hp; r.alive = msg.alive; r.ads = !!msg.ads; r.crouch = !!msg.crouch; r.sprint = !!msg.sprint;
+    r.rl = !!msg.rl;
+    if (msg.weapon) r.weapon = msg.weapon;
   },
   onShoot(msg) {
-    if (msg.ox == null) return;
+    const def = ALL[msg.weapon];
+    if (!def || def.kind !== 'gun' || msg.ox == null) return;
     const o = new THREE.Vector3(msg.ox, msg.oy, msg.oz);
     const d = new THREE.Vector3(msg.dx, msg.dy, msg.dz).normalize();
     const r = remotes.get(msg.id);
-    if (r) { r.flash.fire(); triggerShootKick(r.mesh.userData); }
+    if (r) { remoteFlash(r, msg.weapon).fire(); triggerShootKick(r.mesh.userData); }
     else bullets.muzzleFlash(o);
-    bullets.spawn(o, d, 230, true);
-    audio.play('shot', o.x, o.z, { enemy: true });
+    for (let i = 0; i < Math.min(3, def.pellets || 1); i++) bullets.spawn(o, d, def.bulletSpeed || 230, true);
+    audio.play('shot', o.x, o.z, { enemy: true, snd: msg.weapon });
+  },
+  onMelee(msg) {
+    const r = remotes.get(msg.id);
+    if (r) triggerMelee(r.mesh, msg.thrown ? 'throw' : 'swing');
   },
   onDamage(msg) {
     const src = remotes.get(msg.from);
@@ -251,95 +250,233 @@ const net = createNet({
     if (r) { r.hp = msg.hp; r.alive = msg.alive; }
     refreshPlayerList();
   },
-  onChat(msg) { appendChat(msg); },
-  onRespawnIn(ms) { ctrl.queueRespawn(ms || 2000, () => net.sendRespawn()); },
-  onClose() {
-    if (mode === 'multi' && running) {
-      clearRemotes();
-      showLobby('Disconnected');
-    }
+  onHeal(msg) { ctrl.heal(msg.hp); },
+  onKill(msg) {
+    const me = net.getMyId();
+    hud.addKill(msg.killer === me ? 'You' : msg.kname, msg.victim === me ? 'You' : msg.vname, msg.head);
+    if (msg.killer === me) { hud.hitMarker('kill'); audio.play('kill'); }
+    const r = remotes.get(msg.victim);
+    if (r) { r.alive = false; audio.play('death', r.x, r.z); }
   },
-  onError() { lobbyStatus.textContent = 'Connection error — check WORKER_URL in lib/net.js'; },
+  onScores(msg) {
+    match.apply(msg);
+    const mine = (msg.list || []).find((s) => s.id === net.getMyId());
+    if (mine) { player.kills = mine.k; player.deaths = mine.d; hud.setScore(mine.k, mine.d); }
+  },
+  onPhase(msg) { match.apply(msg); },
+  onSpawn(msg) { ctrl.respawnAt(msg); },
+  onRespawnIn(ms) { ctrl.queueRespawn(ms); },
+  onChat(msg) { appendChat(msg); },
+  onBuild(ev) {
+    if (ev.kind === 'place') build.placeRemote(ev.spec);
+    else if (ev.kind === 'hit') build.damageByKey(ev.key, ev.dmg);
+    else if (ev.kind === 'break') build.destroyByKey(ev.key);
+    else if (ev.kind === 'clear') build.clear();
+  },
+  onFull() { joining = false; hud.setMsg('That room is full', 2200); },
+  onClose() { if (isMulti() && running) enterLobby('Disconnected from the match'); },
+  onError(reason) { joining = false; hud.setMsg(reason || 'Connection error', 2500); },
 });
 
-// ---------- lobby / panel / run state ----------
-function startRun() {
-  running = true;
-  last = performance.now();
-  lobby.classList.add('hide');
-  input.clear();
+// ---------- building ----------
+build = createBuild(scene, tex, {
+  onPlace: (spec, piece, remote) => {
+    if (remote) return;
+    audio.play('click');
+    if (isMulti()) net.sendBuild(spec);
+  },
+  onBreak: (piece) => audio.play('thud', piece.geom.x, piece.geom.z),
+  onHit: (piece) => audio.play('clang', piece.geom.x, piece.geom.z, { vol: 0.4 }),
+  onDenied: (why) => hud.setMsg(why === 'mats' ? 'Not enough materials' : why === 'blocked' ? 'Blocked' : why === 'level' ? "Can't build this high" : '', 800),
+});
+
+// ---------- lobby ----------
+const lobby = createLobby(scene, tex, {
+  onEquip: () => { ctrl.refreshLoadout(); refreshSlotsUI(); audio.play('click'); },
+  onRangeHit: (bull) => { audio.play(bull ? 'headshot' : 'hit'); hud.hitMarker(bull ? 'head' : 'hit'); },
+});
+
+// ---------- bots ----------
+const enemyCtx = {
+  bullets, audio, hud, player, enemies, build,
+  onPlayerHit: (dmg, sx, sz, zone, name) => { if (where === 'bots' && running) ctrl.applyDamage(dmg, sx, sz, name); },
+};
+for (let i = 0; i < MODES.bots.bots; i++) {
+  const m = makeHumanoid(tex, 'enemy');
+  m.visible = false;
+  scene.add(m);
+  enemies.push(createEnemy(m, enemyCtx, i));
+  m.visible = false;
 }
-function showLobby(status) {
-  running = false;
-  panelOpen = false;
-  panel.classList.remove('on');
-  lobby.classList.remove('hide');
-  lobbyStatus.textContent = status || '';
-  input.clear();
-  playerMesh.visible = false;
-  viewmodel.visible = false;
+
+// ---------- input + controller ----------
+const input = createInput(canvas, {
+  isTouch,
+  getPlayer: () => player,
+  isActive: () => running && !panelOpen && !loadoutOpen && !chatFocused(),
+  onReload: () => ctrl.startReload(),
+  onToggleCamera: () => ctrl.toggleCamera(),
+  onAim: (down) => ctrl.setAim(down),
+  onToggleBuild: () => {
+    if (!player.canBuild) { hud.setMsg('Building is disabled in the lobby', 1200); return; }
+    ctrl.toggleBuild();
+  },
+  onBuildTier,
+  onQuickMelee: () => ctrl.quickMelee(),
+  onDigit: (i) => ctrl.digit(i),
+  onScroll: (d) => ctrl.scroll(d),
+});
+function onBuildTier() {
+  if (!player.building) return;
+  hud.setMsg(ctrl.buildTier(), 700);
+}
+
+ctrl = createPlayerController({
+  scene, camera, playerMesh, viewmodel, player, input, bullets, hud, audio, build, world, net,
+  getEnemies: () => (where === 'bots' ? enemies : []),
+  getRemotes: () => remotes,
+  isMulti,
+  isFrozen: () => isMulti() && match.frozen,
+});
+hud.onSlot = (i) => ctrl.digit(i);
+hud.onBuildPick = (i) => ctrl.digit(i);
+hud.onTier = onBuildTier;
+
+// ---------- game flow ----------
+function refreshSlotsUI() {
+  hud.setSlots(SLOTS.map((s, i) => ({ key: String(i + 1), name: ALL[loadout[s]].name })));
+}
+
+function enterLobby(msg) {
+  where = 'lobby';
+  joining = false;
+  net.disconnect();
+  clearRemotes();
   for (const e of enemies) e.mesh.visible = false;
-  hud.setRespawn(null);
-  if (document.pointerLockElement) document.exitPointerLock();
+  build.clear();
+  build.setActive(false);
+  match.begin('bots');
+  lobby.setActive(true);
+  player.canBuild = false;
+  player.kills = player.deaths = 0;
+  hud.setScore(0, 0);
+  ctrl.respawnAt(LOBBY_SPAWN);
+  hud.setMode('lobby');
+  hud.setBanner(null);
+  hud.setStatus('');
+  playerListEl.textContent = '';
+  if (msg) hud.setMsg(msg, 2500);
 }
-function openPanel(fromLobby) {
+
+function startBots() {
+  where = 'bots';
+  lobby.setActive(false);
+  build.clear();
+  match.begin('bots');
+  player.canBuild = true;
+  player.kills = player.deaths = 0;
+  hud.setScore(0, 0);
+  ctrl.respawn();
+  for (const e of enemies) respawnEnemy(e);
+  hud.setMode('bots');
+  hud.setMsg(`Bot Arena — ${enemies.length} hostiles on the map`, 2500);
+}
+
+async function startOnline(modeId) {
+  if (joining) return;
+  if (WORKER_URL.includes('YOUR_SUBDOMAIN')) { hud.setMsg('Set WORKER_URL in lib/net.js first', 3000); return; }
+  joining = true;
+  const code = roomInput.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24);
+  hud.setMsg(code ? `Joining room “${code}”…` : `Finding a ${MODES[modeId].name} match…`, 0);
+  let ok;
+  if (code) ok = await net.connect(code, myName, modeId, loadoutString());
+  else ok = !!(await net.join(modeId, myName, loadoutString(), { onTry: (n) => hud.setMsg(`Searching… room ${n}`, 0) }));
+  if (!ok) { joining = false; hud.setMsg('No match found — try again', 2500); }
+}
+
+const enterPortal = (id) => (id === 'bots' ? startBots() : startOnline(id));
+
+// ---------- panels ----------
+function openPanel() {
   panelOpen = true;
   input.clear();
   panel.classList.add('on');
-  panel.classList.toggle('lobby', !!fromLobby);
-  btnResume.textContent = fromLobby ? 'Back' : 'Resume';
+  btnResume.textContent = running ? 'Resume' : 'Back';
+  btnLobby.style.display = running && where !== 'lobby' ? '' : 'none';
+  btnLoadout.style.display = where === 'lobby' ? '' : 'none';
+  if (document.pointerLockElement) document.exitPointerLock();
 }
 function closePanel() {
   panelOpen = false;
   panel.classList.remove('on');
+  store.set('rr.room', roomInput.value.trim());
   if (running) lockPointer();
 }
 
-btnSettings.addEventListener('click', () => openPanel(true));
-btnResume.addEventListener('click', closePanel);
-btnPause.addEventListener('click', () => { if (running) openPanel(false); });
-btnLeave.addEventListener('click', () => {
-  running = false;
-  net.disconnect();
-  clearRemotes();
-  mode = 'solo';
-  showLobby('');
+const describe = (d) => (d.kind === 'melee' ? d.blurb : `${d.mag}/${d.total} ammo · ${Math.round(60 / d.cd)} rpm · ${reloadDuration(d, d.mag).toFixed(1)}s reload`);
+const SLOT_LABEL = { main: 'MAIN', side: 'SECONDARY', melee: 'MELEE' };
+function renderLoadout() {
+  const grid = $('loadoutGrid');
+  grid.textContent = '';
+  for (const slot of SLOTS) {
+    const col = document.createElement('div');
+    col.className = 'lcol';
+    const h = document.createElement('h3');
+    h.textContent = SLOT_LABEL[slot];
+    col.appendChild(h);
+    for (const d of bySlot(slot)) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'lw' + (loadout[slot] === d.id ? ' on' : '');
+      const n = document.createElement('b'), s = document.createElement('span');
+      n.textContent = d.name; s.textContent = describe(d);
+      b.append(n, s);
+      b.addEventListener('click', () => {
+        setSlot(slot, d.id);
+        lobby.refresh();
+        ctrl.refreshLoadout();
+        refreshSlotsUI();
+        audio.play('click');
+        renderLoadout();
+      });
+      col.appendChild(b);
+    }
+    grid.appendChild(col);
+  }
+}
+function openLoadout() {
+  loadoutOpen = true;
+  input.clear();
+  renderLoadout();
+  loadoutPanel.classList.add('on');
+  if (document.pointerLockElement) document.exitPointerLock();
+}
+function closeLoadout() {
+  loadoutOpen = false;
+  loadoutPanel.classList.remove('on');
+  if (running && !panelOpen) lockPointer();
+}
+
+btnStart.addEventListener('click', () => {
+  audio.unlock();
+  myName = (nameInput.value || 'Player').trim().slice(0, 20) || 'Player';
+  store.set('rr.name', nameInput.value.trim());
+  running = true;
+  last = performance.now();
+  startEl.classList.add('hide');
+  input.clear();
+  lockPointer();
 });
+$('btnSettingsStart').addEventListener('click', openPanel);
+$('btnLoadoutStart').addEventListener('click', openLoadout);
+$('btnLoadoutDone').addEventListener('click', closeLoadout);
+btnResume.addEventListener('click', closePanel);
+btnLoadout.addEventListener('click', () => { closePanel(); openLoadout(); });
+btnLobby.addEventListener('click', () => { closePanel(); enterLobby('Back in the lobby'); });
+$('btnPause').addEventListener('click', () => { if (running) openPanel(); });
 document.addEventListener('pointerlockchange', () => {
   if (isTouch) return;
-  if (document.pointerLockElement !== canvas && running && !panelOpen && !chatFocused()) openPanel(false);
-});
-
-btnSolo.addEventListener('click', () => {
-  audio.unlock();
-  mode = 'solo';
-  clearRemotes();
-  player.kills = player.deaths = 0;
-  hud.setScore(0, 0);
-  ctrl.respawn();
-  setEnemiesActive(true);
-  startRun();
-  lockPointer();
-  playerListEl.textContent = '';
-  hud.setMsg('Solo — 3 hostiles in the area', 2500);
-});
-
-btnJoin.addEventListener('click', () => {
-  audio.unlock();
-  const name = (nameInput.value || 'Player').trim().slice(0, 20) || 'Player';
-  const room = (roomInput.value || 'lobby').trim().toLowerCase().slice(0, 24) || 'lobby';
-  if (WORKER_URL.includes('YOUR_SUBDOMAIN')) {
-    lobbyStatus.textContent = 'Edit WORKER_URL in lib/net.js first (deploy worker)';
-    return;
-  }
-  myName = name;
-  currentRoom = room;
-  store.set('rr.name', nameInput.value.trim());
-  store.set('rr.room', roomInput.value.trim());
-  mode = 'multi';
-  setEnemiesActive(false);
-  lobbyStatus.textContent = 'Connecting…';
-  net.connect(room, name);
+  if (document.pointerLockElement !== canvas && running && !panelOpen && !loadoutOpen && !chatFocused()) openPanel();
 });
 
 // ---------- chat ----------
@@ -347,8 +484,8 @@ chatForm.addEventListener('submit', (e) => {
   e.preventDefault();
   const text = chatInput.value.trim();
   if (text) {
-    if (mode === 'multi' && net.isConnected()) net.sendChat(text);
-    else appendChat({ id: 'local', name: 'You', text }, true);
+    if (isMulti() && net.isConnected()) net.sendChat(text);
+    else appendChat({ id: 'local', name: myName, text });
   }
   chatInput.value = '';
   chatInput.blur();
@@ -359,7 +496,7 @@ chatInput.addEventListener('keydown', (e) => {
   e.stopPropagation();
 });
 addEventListener('keydown', (e) => {
-  if (!running || panelOpen || chatFocused()) return;
+  if (!running || panelOpen || loadoutOpen || chatFocused()) return;
   if (e.code === 'KeyT' || e.code === 'Enter') {
     e.preventDefault();
     input.clear();
@@ -398,42 +535,55 @@ bindCheck('setInvert', 'invertY');
 bindCheck('setFps', 'showFps', () => { if (!settings.showFps) hud.setFps(null); });
 
 // ---------- loop ----------
-function lobbyCam(t) {
+function introCam(t) {
   const a = t * 0.06;
-  camera.position.set(Math.sin(a) * 36, 9 + Math.sin(t * 0.13) * 1.5, -14 + Math.cos(a) * 36);
-  camera.lookAt(0, 2, -14);
+  camera.position.set(Math.sin(a) * 40, 12 + Math.sin(t * 0.13) * 2, 10 + Math.cos(a) * 40);
+  camera.lookAt(0, 4, 10);
   camera.fov = settings.fov;
   camera.updateProjectionMatrix();
-  world.update(0, -14);
 }
 
 function frame(nowMs) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, (nowMs - last) / 1000);
   last = nowMs;
+  const interact = input.consumeInteract();
 
   if (running) {
-    const paused = panelOpen && mode === 'solo';
+    const paused = panelOpen && where !== 'multi';
     if (!paused) {
       const now = performance.now() / 1000;
       ctrl.update(dt);
-      if (mode === 'solo') {
-        for (const e of enemies) updateEnemy(dt, now, e);
+      if (where === 'lobby') {
+        const act = lobby.update(dt, player, interact);
+        hud.setPrompt(joining ? { text: 'Searching for a match…', sub: 'Hang tight', progress: 0 } : lobby.prompt);
+        if (act && act.type === 'portal' && !joining) enterPortal(act.mode);
       } else {
-        updateRemotes(dt);
-        listT -= dt;
-        if (listT <= 0) { listT = 0.25; refreshPlayerList(); }
+        hud.setPrompt(null);
+        if (where === 'bots') {
+          for (const e of enemies) updateEnemy(dt, now, e);
+        } else {
+          updateRemotes(dt);
+          match.tick(dt);
+          hud.setBanner(match.banner());
+          hud.setStatus(match.status());
+          listT -= dt;
+          if (listT <= 0) { listT = 0.25; refreshPlayerList(); }
+        }
       }
       bullets.update(dt);
-      world.update(player.x, player.z);
+      world.update(player.x, player.z, dt);
     }
+    if (isMulti() && input.keys.has('Tab')) hud.setBoard(match.rows(net.getMyId()), match.cfg.teams ? 'TEAMS' : 'SCOREBOARD');
+    else hud.setBoard(null);
     fpsT += dt; fpsN++;
     if (fpsT >= 0.5) {
       if (settings.showFps) hud.setFps(Math.round(fpsN / fpsT));
       fpsT = fpsN = 0;
     }
   } else {
-    lobbyCam(nowMs / 1000);
+    introCam(nowMs / 1000);
+    world.update(0, 10, dt);
     bullets.update(dt);
   }
 
@@ -444,7 +594,6 @@ function frame(nowMs) {
     renderer.render(vmScene, vmCamera);
   }
 }
-requestAnimationFrame(frame);
 
 addEventListener('resize', () => {
   const w = innerWidth, h = innerHeight;
@@ -455,5 +604,10 @@ addEventListener('resize', () => {
   vmCamera.updateProjectionMatrix();
 });
 
+// ---------- boot ----------
+refreshSlotsUI();
+enterLobby();
 hud.update(player);
-hud.setScore(0, 0);
+btnStart.disabled = false;
+btnStart.textContent = 'Enter lobby';
+requestAnimationFrame(frame);
