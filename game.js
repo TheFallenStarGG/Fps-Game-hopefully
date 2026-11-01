@@ -17,6 +17,11 @@ import { createMatch, MODES } from './lib/modes.js';
 import { loadout, setSlot, loadoutString } from './lib/loadout.js';
 import { ALL, SLOTS, bySlot, reloadDuration } from './lib/arsenal.js';
 import { createNet, WORKER_URL } from './lib/net.js';
+import { initMenus } from './lib/menus.js';
+import { createRecorder } from './lib/recorder.js';
+import { applyLayout } from './lib/layout.js';
+import { look, applyLook, decodeLook } from './lib/look.js';
+import { canon } from './lib/keybinds.js';
 
 // let the loading card paint before the big map is built
 await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 30)));
@@ -79,12 +84,13 @@ const bullets = createBulletSystem(scene, tex, {
   onWhiz: () => audio.play('whiz'),
 });
 
-const playerMesh = makeHumanoid(tex, 'player');
+const playerMesh = makeHumanoid(tex, 'player', look);
 playerMesh.visible = false;
 scene.add(playerMesh);
 const viewmodel = makeViewmodel(tex);
 viewmodel.visible = false;
 vmScene.add(viewmodel);
+applyLook(viewmodel, look, tex);
 const player = createPlayerState();
 const enemies = [];
 const remotes = new Map();
@@ -108,8 +114,7 @@ function makeTag(name, color) {
 
 function addRemote(p) {
   if (!p || remotes.has(p.id)) return;
-  const mesh = makeHumanoid(tex, 'remote');
-  scene.add(mesh);
+  const mesh = makeHumanoid(tex, 'remote', p.lk ? decodeLook(p.lk) : null);  scene.add(mesh);
   const col = match.cfg.teams ? (p.team && p.team === match.team ? '#4aa8ff' : '#ff6b4a') : '#ffffff';
   const tag = makeTag(p.name || 'Player', col);
   mesh.add(tag);
@@ -337,6 +342,8 @@ ctrl = createPlayerController({
   getRemotes: () => remotes,
   isMulti,
   isFrozen: () => isMulti() && match.frozen,
+  isTouch,
+  isFriend: (c) => !!(c.remote && match.cfg.teams && c.team && c.team === match.team),
 });
 hud.onSlot = (i) => ctrl.digit(i);
 hud.onBuildPick = (i) => ctrl.digit(i);
@@ -497,8 +504,8 @@ chatInput.addEventListener('keydown', (e) => {
 });
 addEventListener('keydown', (e) => {
   if (!running || panelOpen || loadoutOpen || chatFocused()) return;
-  if (e.code === 'KeyT' || e.code === 'Enter') {
-    e.preventDefault();
+  if (canon(e.code) === 'KeyT' || e.code === 'Enter') {
+  e.preventDefault();
     input.clear();
     chatInput.focus();
     if (document.pointerLockElement) document.exitPointerLock();
@@ -550,7 +557,7 @@ function frame(nowMs) {
   const interact = input.consumeInteract();
 
   if (running) {
-    const paused = panelOpen && where !== 'multi';
+    const paused = panelOpen && !live && where !== 'multi';
     if (!paused) {
       const now = performance.now() / 1000;
       ctrl.update(dt);
@@ -593,6 +600,7 @@ function frame(nowMs) {
     renderer.clearDepth();
     renderer.render(vmScene, vmCamera);
   }
+  recorder.frame(nowMs);
 }
 
 addEventListener('resize', () => {
@@ -603,6 +611,29 @@ addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   vmCamera.updateProjectionMatrix();
 });
+
+// ---------- recording, extra menus, touch layout ----------
+let live = false;
+const recorder = createRecorder({
+  canvas, audio,
+  onStatus: (m) => hud.setMsg(m, 2500),
+  getState: () => ({
+    hp: Math.ceil(player.hp), weapon: player.weaponName, kind: player.weaponKind, ammo: player.ammo, reserve: player.reserve,
+    kills: player.kills, deaths: player.deaths, scope: player.scope,
+  }),
+});
+const _addKill = hud.addKill;
+hud.addKill = (a, b, head) => { recorder.feedKill(a, b, head); _addKill(a, b, head); };
+initMenus({
+  isTouch, player, ctrl, tex, playerMesh, viewmodel, recorder, panel,
+  startCard: document.querySelector('#start .card'),
+  ui: {
+    hidePanel: () => panel.classList.remove('on'),
+    showPanel: () => { if (panelOpen) panel.classList.add('on'); },
+    live: (on) => { live = on; },
+  },
+});
+applyLayout();
 
 // ---------- boot ----------
 refreshSlotsUI();
