@@ -1,188 +1,279 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <title>Realm Range — Multiplayer</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0c10; font-family: system-ui, sans-serif; touch-action: none; }
-    #c { display: block; width: 100%; height: 100%; }
-    #hud { position: fixed; inset: 0; pointer-events: none; color: #e8ecf4; text-shadow: 0 1px 2px #000; }
-    #top {
-      position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 12px; right: 12px;
-      display: flex; justify-content: space-between; gap: 8px; font-size: 14px;
-    }
-    .bar {
-      width: 140px; height: 10px; background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.2);
-      border-radius: 6px; overflow: hidden;
-    }
-    .bar > i { display: block; height: 100%; width: 100%; background: #3dd68c; transform-origin: left center; transform: scaleX(1); }
-    .bar.enemy > i { background: #f07178; }
-    #cross {
-      position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px;
-      border: 2px solid rgba(255,255,255,.85); border-radius: 50%;
-    }
-    #msg {
-      position: absolute; left: 50%; top: 18%; transform: translateX(-50%);
-      font-size: 18px; font-weight: 700; text-align: center; max-width: 90vw;
-    }
-    #hint {
-      position: absolute; bottom: calc(16px + env(safe-area-inset-bottom)); left: 0; right: 0;
-      text-align: center; font-size: 12px; opacity: .75; padding: 0 12px;
-    }
-    #mobile { pointer-events: none; position: absolute; inset: 0; display: none; }
-    body.mobile #mobile { display: block; }
-    body.mobile #hint .pc-only { display: none; }
-    body:not(.mobile) #hint .mob-only { display: none; }
-    .stick-wrap {
-      pointer-events: auto; position: absolute; left: 16px; bottom: calc(20px + env(safe-area-inset-bottom));
-      width: 120px; height: 120px;
-    }
-    .stick-base {
-      width: 100%; height: 100%; border-radius: 50%;
-      background: rgba(255,255,255,.08); border: 2px solid rgba(255,255,255,.2); position: relative;
-    }
-    .stick-knob {
-      position: absolute; left: 50%; top: 50%; width: 54px; height: 54px; margin: -27px 0 0 -27px;
-      border-radius: 50%; background: rgba(255,255,255,.28); border: 2px solid rgba(255,255,255,.4);
-    }
-    #lookZone { pointer-events: auto; position: absolute; right: 0; top: 0; width: 55%; height: 70%; }
-    #btnFire {
-      pointer-events: auto; position: absolute; right: 18px; bottom: calc(28px + env(safe-area-inset-bottom));
-      width: 76px; height: 76px; border-radius: 50%; border: 2px solid rgba(255,80,80,.7);
-      background: rgba(220, 50, 50, .35); color: #fff; font-weight: 700; font-size: 13px;
-    }
-    #btnJump {
-      pointer-events: auto; position: absolute; right: 104px; bottom: calc(36px + env(safe-area-inset-bottom));
-      width: 56px; height: 56px; border-radius: 50%; border: 2px solid rgba(255,255,255,.35);
-      background: rgba(255,255,255,.12); color: #fff; font-size: 12px; font-weight: 600;
-    }
-    #btnCam {
-      pointer-events: auto; position: absolute; left: 16px;
-      bottom: calc(150px + env(safe-area-inset-bottom)); width: 56px; height: 56px; border-radius: 50%;
-      border: 2px solid rgba(224,184,74,.6); background: rgba(224,184,74,.2); color: #ffe9a8;
-      font-size: 11px; font-weight: 700;
-    }
-    #btnReload {
-      pointer-events: auto; position: absolute; right: 104px;
-      bottom: calc(100px + env(safe-area-inset-bottom)); width: 56px; height: 56px; border-radius: 50%;
-      border: 2px solid rgba(255,255,255,.35); background: rgba(255,255,255,.12); color: #fff;
-      font-size: 11px; font-weight: 600;
-    }
-    #btnAim {
-      pointer-events: auto; position: absolute; right: 18px;
-      bottom: calc(110px + env(safe-area-inset-bottom)); width: 64px; height: 64px; border-radius: 50%;
-      border: 2px solid rgba(120,180,255,.7); background: rgba(60,100,180,.35); color: #fff;
-      font-size: 12px; font-weight: 700;
-    }
-    #lobby {
-      position: fixed; inset: 0; background: rgba(6,8,12,.92); z-index: 20;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 12px; color: #e8ecf4; padding: 24px; text-align: center; pointer-events: auto;
-    }
-    #lobby h1 { font-size: 1.6rem; }
-    #lobby p { opacity: .75; max-width: 22rem; line-height: 1.4; font-size: .95rem; }
-    #lobby input {
-      width: min(280px, 90vw); padding: .65rem .9rem; border-radius: 10px;
-      border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.08); color: #fff; font-size: 1rem;
-    }
-    #lobby .row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
-    #lobby button {
-      padding: .7rem 1.2rem; border-radius: 999px; border: none; font-weight: 800; font-size: .95rem; cursor: pointer;
-    }
-    #lobby button.primary { background: #e0b84a; color: #1a1205; }
-    #lobby button.ghost { background: rgba(255,255,255,.12); color: #e8ecf4; }
-    #lobbyStatus { font-size: 13px; opacity: .7; min-height: 1.2em; }
-    #chatWrap {
-      pointer-events: none; position: absolute; left: 12px;
-      bottom: calc(140px + env(safe-area-inset-bottom)); width: min(320px, 70vw);
-      display: flex; flex-direction: column; gap: 6px;
-    }
-    body.mobile #chatWrap { bottom: calc(200px + env(safe-area-inset-bottom)); }
-    #chatLog {
-      max-height: 140px; overflow-y: auto; font-size: 12px; line-height: 1.35;
-      background: rgba(0,0,0,.35); border-radius: 8px; padding: 6px 8px;
-    }
-    #chatLog div { margin-bottom: 2px; word-break: break-word; }
-    #chatLog .sys { opacity: .7; font-style: italic; }
-    #chatLog .name { color: #e0b84a; font-weight: 700; }
-    #chatForm { pointer-events: auto; display: flex; gap: 4px; }
-    #chatInput {
-      flex: 1; padding: 6px 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,.2);
-      background: rgba(0,0,0,.45); color: #fff; font-size: 13px;
-    }
-    #chatSend {
-      padding: 6px 10px; border-radius: 8px; border: none; background: #e0b84a; color: #1a1205; font-weight: 700; font-size: 12px;
-    }
-    #playerList {
-      position: absolute; top: calc(48px + env(safe-area-inset-top)); right: 12px;
-      font-size: 12px; text-align: right; opacity: .9; white-space: pre-line;
-    }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Realm Range</title>
+<style>
+:root { --acc:#ffc247; --bad:#ff4d4d; --ui:#eef2f7; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+* { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+html, body { width:100%; height:100%; overflow:hidden; background:#0a0c10; color:var(--ui);
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; touch-action:none; user-select:none; -webkit-user-select:none; }
+#c { display:block; width:100%; height:100%; }
+button { font:inherit; cursor:pointer; }
+
+/* ---------- HUD ---------- */
+#hud { position:fixed; inset:0; pointer-events:none; text-shadow:0 1px 3px rgba(0,0,0,.85); }
+#hud > * { position:absolute; }
+
+#dmgFlash { inset:0; background:radial-gradient(ellipse at center, transparent 45%, rgba(190,0,0,.6) 100%); opacity:0; }
+#dmgFlash.on { animation:dmg .55s ease-out; }
+@keyframes dmg { 0% { opacity:1; } 100% { opacity:0; } }
+#lowHp { inset:0; box-shadow:inset 0 0 120px 30px rgba(200,0,0,.55); opacity:0; transition:opacity .3s; }
+#lowHp.on { opacity:1; animation:pulse 1.1s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity:.45; } }
+#scopeVig { inset:0; box-shadow:inset 0 0 150px 40px rgba(0,0,0,.45); opacity:0; transition:opacity .15s; }
+#scopeVig.on { opacity:1; }
+
+#dmgRing { left:50%; top:50%; width:0; height:0; }
+.wedge { position:absolute; left:0; top:0; width:0; height:0; animation:wedge 1.2s ease-out forwards; }
+.wedge i { position:absolute; left:-46px; top:-170px; width:92px; height:34px;
+  border-radius:50% 50% 0 0 / 100% 100% 0 0; background:linear-gradient(to bottom, rgba(255,60,60,.9), rgba(255,60,60,0)); }
+@keyframes wedge { 0% { opacity:1; } 100% { opacity:0; } }
+
+#cross { left:50%; top:50%; width:0; height:0; --g:8px; transition:opacity .15s; }
+#cross i { position:absolute; background:#fff; box-shadow:0 0 0 1px rgba(0,0,0,.55); border-radius:1px; }
+#cross .t, #cross .b { width:2px; height:9px; left:-1px; }
+#cross .l, #cross .r { height:2px; width:9px; top:-1px; }
+#cross .t { top:calc(-9px - var(--g)); } #cross .b { top:var(--g); }
+#cross .l { left:calc(-9px - var(--g)); } #cross .r { left:var(--g); }
+#cross .dot { width:2px; height:2px; left:-1px; top:-1px; }
+#cross.ads .t, #cross.ads .b, #cross.ads .l, #cross.ads .r { opacity:0; }
+#cross.hide { opacity:0; }
+
+#hitm { left:50%; top:50%; width:0; height:0; opacity:0; }
+#hitm i { position:absolute; left:0; top:0; width:11px; height:2px; background:#fff; box-shadow:0 0 0 1px rgba(0,0,0,.5); }
+#hitm i:nth-child(1) { transform:translate(-50%,-50%) translate(-11px,-11px) rotate(45deg); }
+#hitm i:nth-child(2) { transform:translate(-50%,-50%) translate(11px,-11px) rotate(-45deg); }
+#hitm i:nth-child(3) { transform:translate(-50%,-50%) translate(-11px,11px) rotate(-45deg); }
+#hitm i:nth-child(4) { transform:translate(-50%,-50%) translate(11px,11px) rotate(45deg); }
+#hitm.show { animation:hm .3s ease-out forwards; }
+#hitm.head i { background:#ff9a2e; }
+#hitm.kill i { background:#ff3b3b; width:15px; }
+#hitm.kill.show { animation:hm .55s ease-out forwards; }
+@keyframes hm { 0% { opacity:1; transform:scale(1.4); } 100% { opacity:0; transform:scale(1); } }
+
+#reloadWrap { left:50%; top:calc(50% + 54px); width:150px; margin-left:-75px; text-align:center; opacity:0; transition:opacity .12s; }
+#reloadWrap.on { opacity:1; }
+#reloadLabel { font:700 11px var(--mono); letter-spacing:.2em; color:var(--acc); margin-bottom:4px; }
+#reloadBar { height:4px; background:rgba(0,0,0,.55); border:1px solid rgba(255,255,255,.25); border-radius:2px; overflow:hidden; }
+#reloadFill { display:block; height:100%; width:100%; background:var(--acc); transform-origin:left; transform:scaleX(0); }
+
+#msg { left:50%; top:16%; transform:translateX(-50%); font-size:18px; font-weight:700; letter-spacing:.04em; text-align:center; max-width:90vw; }
+
+#respawn { inset:0; display:none; flex-direction:column; align-items:center; justify-content:center;
+  background:radial-gradient(ellipse at center, rgba(60,0,0,.15), rgba(40,0,0,.65)); }
+#respawn.on { display:flex; }
+#respawn .big { font:900 46px/1 var(--mono); letter-spacing:.25em; color:#ff5a5a; }
+#respawnCt { margin-top:14px; font:600 18px var(--mono); letter-spacing:.1em; }
+
+#score { top:calc(12px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%); display:flex; gap:18px;
+  font:700 15px var(--mono); padding:5px 16px; background:rgba(0,0,0,.4); border:1px solid rgba(255,255,255,.14); border-radius:4px; }
+#score b { color:var(--acc); }
+
+#killfeed { top:calc(12px + env(safe-area-inset-top)); right:14px; display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
+.kf { background:rgba(0,0,0,.5); padding:4px 10px; border-radius:3px; font-size:13px; display:flex; gap:8px;
+  border-left:3px solid var(--acc); animation:kf .25s ease-out; }
+.kf b.you { color:var(--acc); }
+.kf .ico { opacity:.7; }
+@keyframes kf { from { transform:translateX(30px); opacity:0; } }
+
+#fps { top:calc(12px + env(safe-area-inset-top)); left:14px; font:600 12px var(--mono); opacity:.8; }
+#playerList { top:calc(36px + env(safe-area-inset-top)); left:14px; font-size:12px; white-space:pre-line; opacity:.9; line-height:1.5; }
+
+#vitals { left:18px; bottom:calc(18px + env(safe-area-inset-bottom)); width:230px; }
+#hpRow { display:flex; align-items:baseline; gap:8px; }
+#hpNum { font:800 34px/1 var(--mono); }
+#hpLabel { font:700 11px var(--mono); letter-spacing:.2em; opacity:.7; }
+#hpBar { height:8px; background:rgba(0,0,0,.5); border:1px solid rgba(255,255,255,.18); overflow:hidden; margin-top:6px; transform:skewX(-14deg); }
+#hpFill { display:block; height:100%; width:100%; background:linear-gradient(90deg,#2fc77d,#6af0ae); transform-origin:left; transition:transform .15s; }
+#hpFill.low { background:linear-gradient(90deg,#d63a3a,#ff7a5c); }
+#stance { font:700 11px var(--mono); letter-spacing:.2em; opacity:.7; margin-top:6px; }
+
+#ammoBox { right:18px; bottom:calc(18px + env(safe-area-inset-bottom)); text-align:right; }
+#ammoCur { font:800 44px/1 var(--mono); }
+#ammoCur.low { color:var(--bad); }
+#ammoRes { font:700 20px var(--mono); opacity:.7; margin-left:4px; }
+#pips { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:2px; margin-top:6px; max-width:200px; margin-left:auto; }
+#pips i { width:5px; height:12px; background:var(--acc); transform:skewX(-14deg); }
+#pips i.off { background:rgba(255,255,255,.15); }
+#camMode { font:700 11px var(--mono); letter-spacing:.2em; opacity:.6; margin-top:6px; }
+
+#chatWrap { left:18px; bottom:calc(92px + env(safe-area-inset-bottom)); width:min(340px,70vw); display:flex; flex-direction:column; gap:6px; }
+#chatLog { max-height:130px; overflow-y:auto; font-size:12px; line-height:1.4; background:rgba(0,0,0,.32); border-radius:6px; padding:6px 8px; opacity:.8; }
+#chatLog:empty { display:none; }
+#chatLog div { margin-bottom:2px; word-break:break-word; user-select:text; }
+#chatLog .sys { opacity:.7; font-style:italic; }
+#chatLog .name { color:var(--acc); font-weight:700; }
+#chatForm { display:flex; gap:4px; opacity:0; pointer-events:none; }
+#chatWrap:focus-within #chatForm { opacity:1; pointer-events:auto; }
+#chatInput { flex:1; padding:7px 9px; border-radius:6px; border:1px solid rgba(255,255,255,.25); background:rgba(0,0,0,.6); color:#fff; font-size:13px; user-select:text; }
+#chatSend { padding:7px 12px; border-radius:6px; border:0; background:var(--acc); color:#1a1205; font-weight:800; font-size:12px; }
+
+#hint { left:0; right:0; bottom:calc(10px + env(safe-area-inset-bottom)); text-align:center; font-size:11px; opacity:.7; padding:0 12px;
+  animation:hintfade 1s 16s forwards; }
+@keyframes hintfade { to { opacity:0; } }
+
+/* ---------- menus ---------- */
+#lobby, #panel { position:fixed; inset:0; align-items:center; justify-content:center; padding:20px; }
+#lobby { z-index:20; display:flex; background:radial-gradient(ellipse at center, rgba(6,8,12,.55), rgba(6,8,12,.92)); }
+#lobby.hide { display:none; }
+#panel { z-index:30; display:none; background:rgba(6,8,12,.72); }
+#panel.on { display:flex; }
+.card { width:min(400px,100%); background:rgba(14,18,24,.9); border:1px solid rgba(255,255,255,.12); border-radius:10px;
+  padding:26px 24px; backdrop-filter:blur(6px); pointer-events:auto; }
+#lobby .card { text-align:center; }
+#panel .card { max-height:92vh; overflow:auto; touch-action:pan-y; }
+.card h1 { font:900 30px/1 var(--mono); letter-spacing:.28em; color:var(--acc); }
+.card h2 { font:800 18px var(--mono); letter-spacing:.2em; color:var(--acc); margin-bottom:14px; }
+.card .sub { opacity:.7; font-size:13px; margin:10px 0 18px; line-height:1.4; }
+.card input[type=text] { width:100%; padding:.7rem .9rem; border-radius:6px; border:1px solid rgba(255,255,255,.2);
+  background:rgba(255,255,255,.07); color:#fff; font-size:1rem; margin-bottom:10px; user-select:text; }
+.btns { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; justify-content:center; }
+.btns button { flex:1; min-width:100px; padding:.75rem 1rem; border-radius:6px; border:0; font-weight:800; letter-spacing:.06em; }
+.primary { background:var(--acc); color:#1a1205; }
+.ghost { background:rgba(255,255,255,.12); color:var(--ui); }
+#lobbyStatus { min-height:1.3em; margin-top:12px; font-size:13px; opacity:.8; }
+.row { display:flex; align-items:center; gap:10px; margin:10px 0; font-size:14px; }
+.row span { flex:1; }
+.row input[type=range] { flex:1.2; accent-color:var(--acc); }
+.row b { width:52px; text-align:right; font:700 13px var(--mono); color:var(--acc); }
+.row.chk { cursor:pointer; }
+.row.chk input { accent-color:var(--acc); width:18px; height:18px; }
+.keys { margin:14px 0 4px; padding:10px 12px; background:rgba(255,255,255,.05); border-radius:6px; font-size:12px; line-height:1.7; opacity:.85; }
+.keys b { color:var(--acc); font-family:var(--mono); }
+#panel.lobby #btnLeave { display:none; }
+
+/* ---------- touch ---------- */
+#mobile { inset:0; display:none; }
+body.mobile #mobile { display:block; }
+body.mobile #hint { display:none; }
+#moveZone { pointer-events:auto; position:absolute; left:0; bottom:0; width:48%; height:62%; }
+#lookZone { pointer-events:auto; position:absolute; right:0; top:0; width:55%; height:100%; }
+#stickBase { position:fixed; width:110px; height:110px; margin:-55px 0 0 -55px; border-radius:50%;
+  background:rgba(255,255,255,.08); border:2px solid rgba(255,255,255,.25); opacity:0; pointer-events:none; }
+#stickBase.on { opacity:1; }
+#stickKnob { position:absolute; left:50%; top:50%; width:48px; height:48px; margin:-24px; border-radius:50%;
+  background:rgba(255,255,255,.3); border:2px solid rgba(255,255,255,.5); }
+.mb { pointer-events:auto; position:absolute; border-radius:50%; border:2px solid rgba(255,255,255,.38);
+  background:rgba(255,255,255,.12); color:#fff; font-weight:700; font-size:11px; letter-spacing:.04em; }
+.mb.down, .mb.on { background:rgba(255,194,71,.45); border-color:var(--acc); }
+#btnFire { right:22px; bottom:calc(34px + env(safe-area-inset-bottom)); width:86px; height:86px; border-color:rgba(255,90,90,.8); background:rgba(220,50,50,.35); font-size:13px; }
+#btnAim { right:120px; bottom:calc(40px + env(safe-area-inset-bottom)); width:64px; height:64px; border-color:rgba(120,180,255,.8); background:rgba(60,100,180,.35); }
+#btnJump { right:30px; bottom:calc(136px + env(safe-area-inset-bottom)); width:56px; height:56px; }
+#btnReload { right:100px; bottom:calc(122px + env(safe-area-inset-bottom)); width:52px; height:52px; }
+#btnCrouch { right:162px; bottom:calc(116px + env(safe-area-inset-bottom)); width:52px; height:52px; }
+#btnCam { right:34px; bottom:calc(200px + env(safe-area-inset-bottom)); width:44px; height:44px; border-color:rgba(255,194,71,.7); }
+#btnPause { right:14px; top:calc(96px + env(safe-area-inset-top)); width:38px; height:38px; font-size:14px; }
+body.mobile #vitals { bottom:auto; top:calc(10px + env(safe-area-inset-top)); left:12px; width:150px; }
+body.mobile #hpNum { font-size:22px; }
+body.mobile #ammoBox { bottom:auto; top:calc(48px + env(safe-area-inset-top)); right:12px; }
+body.mobile #ammoCur { font-size:28px; }
+body.mobile #pips, body.mobile #camMode, body.mobile #stance, body.mobile #playerList { display:none; }
+body.mobile #score { top:calc(10px + env(safe-area-inset-top)); }
+body.mobile #killfeed { top:calc(10px + env(safe-area-inset-top)); right:12px; }
+body.mobile #chatWrap { left:12px; bottom:auto; top:calc(70px + env(safe-area-inset-top)); width:46vw; }
+body.mobile #chatLog { max-height:80px; }
+body.mobile #chatForm { opacity:1; pointer-events:auto; }
+</style>
 </head>
 <body>
-  <canvas id="c"></canvas>
-  <div id="hud">
-    <div id="top">
-      <div>
-        <div>You</div>
-        <div class="bar"><i id="hpYou"></i></div>
-      </div>
-      <div style="text-align:right">
-        <div id="targetLabel">Target</div>
-        <div class="bar enemy" style="margin-left:auto"><i id="hpEnemy"></i></div>
-      </div>
-    </div>
-    <div id="playerList"></div>
-    <div id="cross"></div>
-    <div id="camMode" style="position:absolute;left:14px;bottom:calc(110px + env(safe-area-inset-bottom));font-size:13px;font-weight:700;opacity:.9">3RD</div>
-    <div id="ammo" style="position:absolute;right:14px;bottom:calc(110px + env(safe-area-inset-bottom));font-size:15px;font-weight:700;text-align:right"></div>
-    <div id="scopeVignette" style="display:none;position:absolute;inset:0;box-shadow:inset 0 0 100px 50px rgba(0,0,0,.7);pointer-events:none"></div>
-    <div id="msg"></div>
-    <div id="chatWrap">
-      <div id="chatLog"></div>
-      <form id="chatForm" autocomplete="off">
-        <input id="chatInput" type="text" maxlength="200" placeholder="Chat… (Enter)" />
-        <button type="submit" id="chatSend">Send</button>
-      </form>
-    </div>
-    <div id="hint">
-      <span class="pc-only">WASD · V cam · RMB aim · R reload · Enter chat · T focus chat</span>
-      <span class="mob-only">Stick · FIRE · AIM · RELOAD · CAM · chat below</span>
-    </div>
-    <div id="mobile">
-      <div class="stick-wrap" id="stick">
-        <div class="stick-base"><div class="stick-knob" id="knob"></div></div>
-      </div>
-      <div id="lookZone"></div>
-      <button type="button" id="btnJump">JUMP</button>
-      <button type="button" id="btnCam">CAM</button>
-      <button type="button" id="btnReload">RELOAD</button>
-      <button type="button" id="btnAim">AIM</button>
-      <button type="button" id="btnFire">FIRE</button>
-    </div>
+<canvas id="c"></canvas>
+
+<div id="hud">
+  <div id="dmgFlash"></div>
+  <div id="lowHp"></div>
+  <div id="scopeVig"></div>
+  <div id="dmgRing"></div>
+  <div id="cross"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><i class="dot"></i></div>
+  <div id="hitm"><i></i><i></i><i></i><i></i></div>
+  <div id="reloadWrap"><div id="reloadLabel">RELOADING</div><div id="reloadBar"><i id="reloadFill"></i></div></div>
+  <div id="msg"></div>
+  <div id="respawn"><div class="big">YOU DIED</div><div id="respawnCt"></div></div>
+  <div id="score"><span>K <b id="kills">0</b></span><span>D <b id="deaths">0</b></span></div>
+  <div id="killfeed"></div>
+  <div id="fps"></div>
+  <div id="playerList"></div>
+
+  <div id="vitals">
+    <div id="hpRow"><div id="hpNum">100</div><div id="hpLabel">HEALTH</div></div>
+    <div id="hpBar"><i id="hpFill"></i></div>
+    <div id="stance"></div>
+  </div>
+  <div id="ammoBox">
+    <div><span id="ammoCur">30</span><span id="ammoRes">/ 120</span></div>
+    <div id="pips"></div>
+    <div id="camMode">1ST PERSON</div>
   </div>
 
-  <div id="lobby">
-    <h1>Realm Range</h1>
-    <p>Multiplayer FPS + chat. Same room code = same match.</p>
-    <input id="nameInput" type="text" maxlength="20" placeholder="Your name" />
+  <div id="chatWrap">
+    <div id="chatLog"></div>
+    <form id="chatForm" autocomplete="off">
+      <input id="chatInput" type="text" maxlength="200" placeholder="Chat…" />
+      <button type="submit" id="chatSend">Send</button>
+    </form>
+  </div>
+
+  <div id="hint">WASD move · Shift sprint · C crouch · Space jump · RMB aim · R reload · V camera · T chat · Esc menu</div>
+
+  <div id="mobile">
+    <div id="moveZone"></div>
+    <div id="stickBase"><div id="stickKnob"></div></div>
+    <div id="lookZone"></div>
+    <button type="button" class="mb" id="btnFire">FIRE</button>
+    <button type="button" class="mb" id="btnAim">AIM</button>
+    <button type="button" class="mb" id="btnJump">JUMP</button>
+    <button type="button" class="mb" id="btnReload">RELOAD</button>
+    <button type="button" class="mb" id="btnCrouch">CROUCH</button>
+    <button type="button" class="mb" id="btnCam">CAM</button>
+    <button type="button" class="mb" id="btnPause">II</button>
+  </div>
+</div>
+
+<div id="lobby">
+  <div class="card">
+    <h1>REALM RANGE</h1>
+    <p class="sub">Tactical FPS with room chat.<br />Same room code = same match.</p>
+    <input id="nameInput" type="text" maxlength="20" placeholder="Callsign" />
     <input id="roomInput" type="text" maxlength="24" placeholder="Room code (e.g. cool01)" />
-    <div class="row">
+    <div class="btns">
       <button type="button" class="primary" id="btnJoin">Join room</button>
-      <button type="button" class="ghost" id="btnSolo">Solo (bots)</button>
+      <button type="button" class="ghost" id="btnSolo">Solo vs bots</button>
     </div>
+    <div class="btns"><button type="button" class="ghost" id="btnSettings">Settings &amp; controls</button></div>
     <div id="lobbyStatus"></div>
   </div>
+</div>
 
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.170.0/build/three.module.js"
-    }
+<div id="panel">
+  <div class="card">
+    <h2>SETTINGS</h2>
+    <label class="row"><span>Look sensitivity</span><input id="setSens" type="range" min="0.3" max="3" step="0.05" /><b id="setSensVal"></b></label>
+    <label class="row"><span>Field of view</span><input id="setFov" type="range" min="60" max="110" step="1" /><b id="setFovVal"></b></label>
+    <label class="row"><span>Volume</span><input id="setVol" type="range" min="0" max="1" step="0.01" /><b id="setVolVal"></b></label>
+    <label class="row chk"><input id="setAdsToggle" type="checkbox" /><span>Toggle aim (off = hold)</span></label>
+    <label class="row chk"><input id="setInvert" type="checkbox" /><span>Invert Y axis</span></label>
+    <label class="row chk"><input id="setFps" type="checkbox" /><span>Show FPS</span></label>
+    <div class="keys">
+      <b>WASD</b> move · <b>Shift</b> sprint · <b>C</b> crouch (hold) · <b>Space</b> jump<br />
+      <b>Mouse</b> look · <b>LMB</b> fire · <b>RMB</b> aim down sights · <b>R</b> reload<br />
+      <b>V</b> first / third person · <b>T</b> or <b>Enter</b> chat · <b>Esc</b> menu
+    </div>
+    <div class="btns">
+      <button type="button" class="primary" id="btnResume">Resume</button>
+      <button type="button" class="ghost" id="btnLeave">Leave match</button>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
   }
-  </script>
-  <script type="module" src="./game.js"></script>
+}
+</script>
+<script type="module" src="./game.js"></script>
 </body>
 </html>
