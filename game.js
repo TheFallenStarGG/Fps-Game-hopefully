@@ -624,6 +624,8 @@ const recorder = createRecorder({
 });
 const _addKill = hud.addKill;
 hud.addKill = (a, b, head) => { recorder.feedKill(a, b, head); _addKill(a, b, head); };
+const _hitMarker = hud.hitMarker;
+hud.hitMarker = (kind) => { recorder.hitMarker(kind); _hitMarker(kind); };
 initMenus({
   isTouch, player, ctrl, tex, playerMesh, viewmodel, recorder, panel,
   startCard: document.querySelector('#start .card'),
