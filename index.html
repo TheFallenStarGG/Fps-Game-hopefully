@@ -266,6 +266,28 @@ body.mobile #chatForm { opacity:1; pointer-events:auto; }
   </div>
 </div>
 
+<script>
+(function () {
+  var box = document.createElement('pre');
+  box.style.cssText = 'position:fixed;left:0;right:0;bottom:0;max-height:45%;overflow:auto;margin:0;padding:8px;background:rgba(120,0,0,.92);color:#fff;font:11px/1.4 monospace;z-index:99999;white-space:pre-wrap;display:none;user-select:text;pointer-events:auto;touch-action:pan-y';
+  function show(t) {
+    if (!box.parentNode) document.body.appendChild(box);
+    box.style.display = 'block';
+    box.textContent += t + '\n\n';
+  }
+  addEventListener('error', function (e) {
+    if (e.target && e.target !== window && e.target.tagName) {
+      show('Failed to load: ' + (e.target.src || e.target.href || e.target.tagName));
+      return;
+    }
+    show((e.message || 'Error') + '\n' + String(e.filename || '').split('/').slice(-2).join('/') + ':' + e.lineno + ':' + e.colno);
+  }, true);
+  addEventListener('unhandledrejection', function (e) {
+    show('Promise error: ' + ((e.reason && (e.reason.stack || e.reason.message)) || e.reason));
+  });
+})();
+</script>
+  
 <script type="importmap">
 {
   "imports": {
