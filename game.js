@@ -117,8 +117,7 @@ function makeTag(name, color) {
 
 function addRemote(p) {
   if (!p || remotes.has(p.id)) return;
-  const mesh = makeHumanoid(tex, 'remote', p.lk ? decodeLook(p.lk) : null);
-  scene.add(mesh);
+  const mesh = makeHumanoid(tex, 'remote', p.lk ? decodeLook(p.lk) : null);  scene.add(mesh);
   const col = match.cfg.teams ? (p.team && p.team === match.team ? '#4aa8ff' : '#ff6b4a') : '#ffffff';
   const tag = makeTag(p.name || 'Player', col);
   mesh.add(tag);
