@@ -577,6 +577,7 @@ bindRange('setVol', 'volume', (v) => Math.round(v * 100) + '%', () => audio.setV
 bindCheck('setAdsToggle', 'adsToggle');
 bindCheck('setInvert', 'invertY');
 bindCheck('setFps', 'showFps', () => { if (!settings.showFps) hud.setFps(null); });
+bindCheck('setMinimap', 'showMinimap');
 
 // Graphics button in the pause menu
 {
