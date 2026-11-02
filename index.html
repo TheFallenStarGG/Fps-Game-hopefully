@@ -189,9 +189,13 @@ body.mobile #status { top:calc(44px + var(--sa)); }
 body.mobile #slots { bottom:auto; top:calc(70px + var(--sa)); left:50%; } body.mobile .slot { min-width:0; padding:4px 8px; }
 body.mobile #prompt { bottom:auto; top:calc(110px + var(--sa)); }
 body.mobile #buildBar { bottom:calc(130px + var(--sb)); }
-body.mobile #chatWrap { left:12px; bottom:auto; top:calc(116px + var(--sa)); width:44vw; } body.mobile #chatLog { max-height:70px; }
+body.mobile #chatWrap { left:12px; bottom:auto; top:calc(116px + var(--sa)); width:44vw; z-index:6; } body.mobile #chatLog { max-height:70px; }
+body.mobile #fps { top:auto; bottom:calc(8px + var(--sb)); left:50%; transform:translateX(-50%); }
 body.mobile #chatForm { opacity:1; pointer-events:auto; }
 </style>
+  <meta property="og:image" content="https://bolt.new/static/og_default.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://bolt.new/static/og_default.png">
 </head>
 <body data-mode="lobby">
 <canvas id="c"></canvas>
@@ -282,6 +286,7 @@ body.mobile #chatForm { opacity:1; pointer-events:auto; }
     <label class="row chk"><input id="setAdsToggle" type="checkbox" /><span>Toggle aim (off = hold)</span></label>
     <label class="row chk"><input id="setInvert" type="checkbox" /><span>Invert Y axis</span></label>
     <label class="row chk"><input id="setFps" type="checkbox" /><span>Show FPS</span></label>
+    <label class="row chk"><input id="setMinimap" type="checkbox" /><span>Show minimap</span></label>
     <div class="note">Private room: type a code and the online portals join exactly that room (friends use the same code). Leave empty for matchmaking.</div>
     <input id="roomInput" type="text" maxlength="24" placeholder="Private room code (optional)" />
     <div class="keys">
