@@ -10,7 +10,8 @@ import { createBulletSystem } from './lib/weapons.js';
 import { createHud } from './lib/hud.js';
 import { createInput } from './lib/input.js';
 import { createPlayerState, createPlayerController } from './lib/player.js';
-import { createEnemy, updateEnemy, respawnEnemy } from './lib/enemy.js';
+import { createEnemy, updateEnemy, respawnEnemy, applyTeam } from './lib/enemy.js';
+import { clampArenaCfg, assignRoles } from './lib/botTeams.js';
 import { updateHumanoidAnim, triggerShootKick, triggerMelee, ensureWeapon, LOD } from './lib/anim.js';
 import { createBuild } from './lib/build.js';
 import { createLobby, LOBBY_SPAWN } from './lib/lobby.js';
@@ -321,8 +322,13 @@ const lobby = createLobby(scene, tex, {
 const enemyCtx = {
   bullets, audio, hud, player, enemies, build,
   onPlayerHit: (dmg, sx, sz, zone, name) => { if (where === 'bots' && running) ctrl.applyDamage(dmg, sx, sz, name); },
+  onBotKill: (killer, victim, head) => {
+    if (where !== 'bots') return;
+    hud.addKill(killer.name, victim.name, head);
+  },
 };
-for (let i = 0; i < MODES.bots.bots; i++) {
+const MAX_ARENA_BOTS = 40;
+for (let i = 0; i < MAX_ARENA_BOTS; i++) {
   const m = makeHumanoid(tex, 'enemy');
   m.visible = false;
   scene.add(m);
@@ -332,15 +338,31 @@ for (let i = 0; i < MODES.bots.bots; i++) {
   m.visible = false;
 }
 
-/** how many bots take part in the Bot Arena (optional performance setting) */
-function setBotCount(n) {
-  const want = Math.max(1, Math.min(allEnemies.length, Math.round(n) || allEnemies.length));
+/** Build Bot Arena roster from team/size/leader settings. */
+function setupArenaFromSettings() {
+  const cfg = clampArenaCfg(settings);
+  const roles = assignRoles(cfg);
   enemies.length = 0;
   allEnemies.forEach((e, i) => {
-    if (i < want) enemies.push(e);
-    else e.mesh.visible = false;
+    if (i < roles.length) {
+      applyTeam(e, roles[i]);
+      enemies.push(e);
+    } else {
+      e.mesh.visible = false;
+      e.alive = false;
+    }
   });
-  if (where === 'bots') for (const e of enemies) if (!e.mesh.visible) respawnEnemy(e);
+  enemyCtx.enemies = enemies;
+  if (where === 'bots') {
+    for (const e of enemies) respawnEnemy(e);
+  }
+}
+
+function setBotCount(n) {
+  const teams = Math.max(2, Math.min(4, settings.botTeams || 2));
+  settings.botTeamSize = Math.max(4, Math.min(10, Math.round((n || 12) / teams)));
+  saveSettings();
+  setupArenaFromSettings();
 }
 
 // ---------- graphics (quality settings, post effects, menu) ----------
@@ -352,7 +374,7 @@ const gfx = createGfx({
     for (const r of remotes.values()) l.push(r.mesh);
     return l;
   },
-  maxBots: MODES.bots.bots,
+  maxBots: MAX_ARENA_BOTS,
   onBots: setBotCount,
   say: (t) => hud.setMsg(t, 2400),
 });
@@ -439,10 +461,15 @@ function startBots() {
   player.canBuild = true;
   player.kills = player.deaths = 0;
   hud.setScore(0, 0);
+  setupArenaFromSettings();
   ctrl.respawn();
   for (const e of enemies) respawnEnemy(e);
+  const cfg = clampArenaCfg(settings);
   hud.setMode('bots');
-  hud.setMsg(`Bot Arena — ${enemies.length} hostiles on the map`, 2500);
+  hud.setMsg(
+    `Bot Arena — ${cfg.teams} teams × ${cfg.size} (${cfg.leaders} leaders/team) · all vs you & each other`,
+    3500,
+  );
 }
 
 async function startOnline(modeId) {
