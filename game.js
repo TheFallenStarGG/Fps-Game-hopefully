@@ -592,7 +592,7 @@ chatInput.addEventListener('keydown', (e) => {
 });
 addEventListener('keydown', (e) => {
   if (!running || panelOpen || loadoutOpen || chatFocused()) return;
-  if (canon(e.code) === 'KeyM' && isMulti()) { radar.toggleFull(); return; }
+  if (canon(e.code) === 'KeyM' && running && where !== 'lobby') { radar.toggleFull(); return; }
   if (canon(e.code) === 'KeyT' || e.code === 'Enter') {
     e.preventDefault();
     input.clear();
@@ -630,6 +630,7 @@ bindCheck('setAdsToggle', 'adsToggle');
 bindCheck('setInvert', 'invertY');
 bindCheck('setFps', 'showFps', () => { if (!settings.showFps) hud.setFps(null); });
 bindCheck('setMinimap', 'showMinimap');
+bindRange('setMinimapSize', 'minimapSize', (v) => Math.round(v) + 'px');
 
 // Graphics button in the pause menu
 {
@@ -688,7 +689,11 @@ function frame(nowMs) {
       }
       bullets.update(dt);
       world.update(player.x, player.z, dt);
-      radar.update(player, remotes, dt, isMulti());
+      radar.update(player, remotes, dt, {
+        active: running && where !== 'lobby',
+        enemies: where === 'bots' ? enemies : null,
+        build,
+      });
     }
     if (isMulti() && input.keys.has('Tab')) hud.setBoard(match.rows(net.getMyId()), match.cfg.teams ? 'TEAMS' : 'SCOREBOARD');
     else hud.setBoard(null);
