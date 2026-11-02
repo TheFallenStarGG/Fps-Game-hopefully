@@ -202,8 +202,14 @@ function appendChat(msg) {
 // ---------- network ----------
 let build = null;
 const net = createNet({
+  // bot arena server followers
+
   onWelcome(msg) {
     if (msg.mode === 'lobby') { onLobbyWelcome(msg); return; }
+    if (msg.mode === 'bots') {
+      // bot arena already set where; keep local leaders
+      return;
+    }
     where = 'multi';
     joining = false;
     lobby.setActive(false);
@@ -283,6 +289,28 @@ const net = createNet({
     else if (ev.kind === 'break') build.destroyByKey(ev.key);
     else if (ev.kind === 'clear') build.clear();
   },
+  onBots(msg) {
+    if (where !== 'bots' || !msg.list) return;
+    const byId = new Map(msg.list.map((b) => [b.id, b]));
+    for (const e of enemies) {
+      if (!e.serverSide || !e.serverId) continue;
+      const b = byId.get(e.serverId);
+      if (!b) continue;
+      e.sx = b.x; e.sy = b.y; e.sz = b.z; e.syaw = b.yaw;
+      e.hp = b.hp;
+      const was = e.alive;
+      e.alive = !!b.alive;
+      if (!e.alive && was) { e.deathT = 0; audio.play('death', e.x, e.z); }
+      if (e.alive) e.mesh.visible = true;
+    }
+  },
+  onBotShoot(msg) {
+    if (!msg) return;
+    const o = new THREE.Vector3(msg.x, msg.y || 1.4, msg.z);
+    const d = new THREE.Vector3(msg.dx || 0, msg.dy || 0, msg.dz || 1).normalize();
+    bullets.spawn(o, d, 150, true);
+    audio.play('shot', msg.x, msg.z, { enemy: true, snd: 'stinger' });
+  },
   onFull() { joining = false; hud.setMsg('That room is full', 2200); },
   onClose() {
     if (isMulti() && running) enterLobby('Disconnected from the match');
@@ -320,7 +348,7 @@ const lobby = createLobby(scene, tex, {
 
 // ---------- bots ----------
 const enemyCtx = {
-  bullets, audio, hud, player, enemies, build,
+  bullets, audio, hud, player, enemies, build, net, net: null,
   onPlayerHit: (dmg, sx, sz, zone, name) => { if (where === 'bots' && running) ctrl.applyDamage(dmg, sx, sz, name); },
   onBotKill: (killer, victim, head) => {
     if (where !== 'bots') return;
@@ -453,7 +481,7 @@ function enterLobby(msg) {
   if (running) joinGlobalLobby();
 }
 
-function startBots() {
+async function startBots() {
   where = 'bots';
   lobby.setActive(false);
   build.clear();
@@ -461,15 +489,29 @@ function startBots() {
   player.canBuild = true;
   player.kills = player.deaths = 0;
   hud.setScore(0, 0);
-  setupArenaFromSettings();
+  if (typeof setupArenaFromSettings === 'function') setupArenaFromSettings();
+  else {
+    for (const e of enemies) { e.mesh.visible = true; }
+  }
   ctrl.respawn();
-  for (const e of enemies) respawnEnemy(e);
-  const cfg = clampArenaCfg(settings);
+  for (const e of enemies) {
+    if (e.isLeader) respawnEnemy(e);
+    else { e.mesh.visible = true; e.alive = true; e.hp = e.maxHp; }
+  }
+  const cfg = typeof clampArenaCfg === 'function' ? clampArenaCfg(settings) : { teams: 2, size: 6, leaders: 1 };
   hud.setMode('bots');
-  hud.setMsg(
-    `Bot Arena — ${cfg.teams} teams × ${cfg.size} (${cfg.leaders} leaders/team) · all vs you & each other`,
-    3500,
-  );
+  hud.setMsg(`Bot Arena — connecting followers to server…`, 2000);
+  const room = 'bots-' + Math.random().toString(36).slice(2, 8);
+  const ok = await net.connect(room, 'Player', 'bots', loadoutString(), {
+    teams: cfg.teams, size: cfg.size, leaders: cfg.leaders,
+  });
+  if (ok) {
+    net.startStateLoop(() => player);
+    hud.setMsg(`Bot Arena — ${cfg.teams} teams × ${cfg.size} (${cfg.leaders} leaders client / rest server)`, 3500);
+  } else {
+    hud.setMsg('Server followers unavailable — local followers fallback', 3500);
+    for (const e of enemies) { e.serverSide = false; if (!e.isLeader) respawnEnemy(e); }
+  }
 }
 
 async function startOnline(modeId) {
