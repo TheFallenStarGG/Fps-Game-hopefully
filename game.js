@@ -202,6 +202,7 @@ function appendChat(msg) {
 let build = null;
 const net = createNet({
   onWelcome(msg) {
+    if (msg.mode === 'lobby') { onLobbyWelcome(msg); return; }
     where = 'multi';
     joining = false;
     lobby.setActive(false);
@@ -282,9 +283,21 @@ const net = createNet({
     else if (ev.kind === 'clear') build.clear();
   },
   onFull() { joining = false; hud.setMsg('That room is full', 2200); },
-  onClose() { if (isMulti() && running) enterLobby('Disconnected from the match'); },
+  onClose() {
+    if (isMulti() && running) enterLobby('Disconnected from the match');
+    else if (where === 'lobby' && running) { clearRemotes(); joinGlobalLobby(); }
+  },
   onError(reason) { joining = false; hud.setMsg(reason || 'Connection error', 2500); },
 });
+
+function onLobbyWelcome(msg) {
+  clearRemotes();
+  for (const p of msg.players || []) addRemote(p);
+  chatLog.textContent = '';
+  for (const c of msg.chat || []) appendChat(c);
+  net.startStateLoop(() => player);
+  hud.setMsg(`Global lobby · ${(msg.players || []).length + 1} online`, 2200);
+}
 
 // ---------- building ----------
 build = createBuild(scene, tex, {
@@ -390,6 +403,12 @@ function refreshSlotsUI() {
   hud.setSlots(SLOTS.map((s, i) => ({ key: String(i + 1), name: ALL[loadout[s]].name })));
 }
 
+const GLOBAL_LOBBY_ROOM = 'global-lobby';
+function joinGlobalLobby() {
+  if (WORKER_URL.includes('YOUR_SUBDOMAIN')) return;
+  net.connect(GLOBAL_LOBBY_ROOM, myName, 'lobby', loadoutString());
+}
+
 function enterLobby(msg) {
   where = 'lobby';
   joining = false;
@@ -409,6 +428,7 @@ function enterLobby(msg) {
   hud.setStatus('');
   playerListEl.textContent = '';
   if (msg) hud.setMsg(msg, 2500);
+  if (running) joinGlobalLobby();
 }
 
 function startBots() {
@@ -434,7 +454,11 @@ async function startOnline(modeId) {
   let ok;
   if (code) ok = await net.connect(code, myName, modeId, loadoutString());
   else ok = !!(await net.join(modeId, myName, loadoutString(), { onTry: (n) => hud.setMsg(`Searching… room ${n}`, 0) }));
-  if (!ok) { joining = false; hud.setMsg('No match found — try again', 2500); }
+  if (!ok) {
+    joining = false;
+    hud.setMsg('No match found — try again', 2500);
+    if (where === 'lobby') joinGlobalLobby();
+  }
 }
 
 const enterPortal = (id) => (id === 'bots' ? startBots() : startOnline(id));
@@ -508,6 +532,7 @@ btnStart.addEventListener('click', () => {
   last = performance.now();
   startEl.classList.add('hide');
   input.clear();
+  joinGlobalLobby();
   lockPointer();
 });
 $('btnSettingsStart').addEventListener('click', openPanel);
@@ -527,7 +552,7 @@ chatForm.addEventListener('submit', (e) => {
   e.preventDefault();
   const text = chatInput.value.trim();
   if (text) {
-    if (isMulti() && net.isConnected()) net.sendChat(text);
+    if (net.isConnected()) net.sendChat(text);
     else appendChat({ id: 'local', name: myName, text });
   }
   chatInput.value = '';
@@ -620,6 +645,7 @@ function frame(nowMs) {
         const act = lobby.update(dt, player, interact);
         hud.setPrompt(joining ? { text: 'Searching for a match…', sub: 'Hang tight', progress: 0 } : lobby.prompt);
         if (act && act.type === 'portal' && !joining) enterPortal(act.mode);
+        updateRemotes(dt);
       } else {
         hud.setPrompt(null);
         if (where === 'bots') {
