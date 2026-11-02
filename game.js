@@ -10,7 +10,7 @@ import { createHud } from './lib/hud.js';
 import { createInput } from './lib/input.js';
 import { createPlayerState, createPlayerController } from './lib/player.js';
 import { createEnemy, updateEnemy, respawnEnemy } from './lib/enemy.js';
-import { updateHumanoidAnim, triggerShootKick, triggerMelee, ensureWeapon } from './lib/anim.js';
+import { updateHumanoidAnim, triggerShootKick, triggerMelee, ensureWeapon, LOD } from './lib/anim.js';
 import { createBuild } from './lib/build.js';
 import { createLobby, LOBBY_SPAWN } from './lib/lobby.js';
 import { createMatch, MODES } from './lib/modes.js';
@@ -22,6 +22,7 @@ import { createRecorder } from './lib/recorder.js';
 import { applyLayout } from './lib/layout.js';
 import { look, applyLook, decodeLook } from './lib/look.js';
 import { canon } from './lib/keybinds.js';
+import { createGfx } from './lib/gfx.js';
 
 // let the loading card paint before the big map is built
 await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 30)));
@@ -50,20 +51,19 @@ const lockPointer = () => { if (!isTouch) { try { canvas.requestPointerLock(); }
 const isMulti = () => where === 'multi';
 
 // ---------- renderer / world ----------
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isTouch, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(devicePixelRatio, isTouch ? 1.5 : 2));
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isTouch && settings.aa, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, isTouch ? 1.5 : 2)); // gfx.apply() applies the render-scale setting
 renderer.setSize(innerWidth, innerHeight, false);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.autoClear = false;
 
-const tex = createTextures();
+const tex = createTextures({ res: settings.texRes, aniso: Math.min(settings.aniso, renderer.capabilities.getMaxAnisotropy()) });
 const audio = createAudio(settings);
 audio.setVolume(settings.volume);
 const world = createWorld(renderer, tex);
 const scene = world.scene;
-if (isTouch) world.sun.shadow.mapSize.set(1024, 1024);
 const camera = new THREE.PerspectiveCamera(settings.fov, innerWidth / innerHeight, 0.05, 400);
 scene.add(camera);
 
@@ -92,7 +92,8 @@ viewmodel.visible = false;
 vmScene.add(viewmodel);
 applyLook(viewmodel, look, tex);
 const player = createPlayerState();
-const enemies = [];
+const enemies = []; // active bots
+const allEnemies = []; // full pool
 const remotes = new Map();
 let ctrl = null;
 
@@ -202,7 +203,7 @@ const net = createNet({
     where = 'multi';
     joining = false;
     lobby.setActive(false);
-    for (const e of enemies) e.mesh.visible = false;
+    for (const e of allEnemies) e.mesh.visible = false;
     build.clear();
     player.canBuild = true;
     match.begin(msg.mode);
@@ -310,9 +311,42 @@ for (let i = 0; i < MODES.bots.bots; i++) {
   const m = makeHumanoid(tex, 'enemy');
   m.visible = false;
   scene.add(m);
-  enemies.push(createEnemy(m, enemyCtx, i));
+  const e = createEnemy(m, enemyCtx, i);
+  enemies.push(e);
+  allEnemies.push(e);
   m.visible = false;
 }
+
+/** how many bots take part in the Bot Arena (optional performance setting) */
+function setBotCount(n) {
+  const want = Math.max(1, Math.min(allEnemies.length, Math.round(n) || allEnemies.length));
+  enemies.length = 0;
+  allEnemies.forEach((e, i) => {
+    if (i < want) enemies.push(e);
+    else e.mesh.visible = false;
+  });
+  if (where === 'bots') for (const e of enemies) if (!e.mesh.visible) respawnEnemy(e);
+}
+
+// ---------- graphics (quality settings, post effects, menu) ----------
+const gfx = createGfx({
+  renderer, scene, camera, vmScene, vmCamera, world, tex, isTouch,
+  getCharacters: () => {
+    const l = [playerMesh];
+    for (const e of allEnemies) l.push(e.mesh);
+    for (const r of remotes.values()) l.push(r.mesh);
+    return l;
+  },
+  maxBots: MODES.bots.bots,
+  onBots: setBotCount,
+  say: (t) => hud.setMsg(t, 2400),
+});
+gfx.apply();
+
+// optional: skip shell casings / dropped mags (physics + collision checks every frame)
+const _eject = bullets.ejectShell, _drop = bullets.dropMag;
+bullets.ejectShell = (...a) => { if (settings.debris) _eject(...a); };
+bullets.dropMag = (...a) => { if (settings.debris) _drop(...a); };
 
 // ---------- input + controller ----------
 const input = createInput(canvas, {
@@ -359,7 +393,7 @@ function enterLobby(msg) {
   joining = false;
   net.disconnect();
   clearRemotes();
-  for (const e of enemies) e.mesh.visible = false;
+  for (const e of allEnemies) e.mesh.visible = false;
   build.clear();
   build.setActive(false);
   match.begin('bots');
@@ -505,7 +539,7 @@ chatInput.addEventListener('keydown', (e) => {
 addEventListener('keydown', (e) => {
   if (!running || panelOpen || loadoutOpen || chatFocused()) return;
   if (canon(e.code) === 'KeyT' || e.code === 'Enter') {
-  e.preventDefault();
+    e.preventDefault();
     input.clear();
     chatInput.focus();
     if (document.pointerLockElement) document.exitPointerLock();
@@ -541,6 +575,20 @@ bindCheck('setAdsToggle', 'adsToggle');
 bindCheck('setInvert', 'invertY');
 bindCheck('setFps', 'showFps', () => { if (!settings.showFps) hud.setFps(null); });
 
+// Graphics button in the pause menu
+{
+  const pc = panel.querySelector('.card');
+  const gb = document.createElement('div');
+  gb.className = 'btns';
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'ghost';
+  b.textContent = 'Graphics & performance';
+  b.addEventListener('click', () => gfx.openMenu());
+  gb.append(b);
+  pc.insertBefore(gb, pc.querySelector('.keys'));
+}
+
 // ---------- loop ----------
 function introCam(t) {
   const a = t * 0.06;
@@ -552,9 +600,12 @@ function introCam(t) {
 
 function frame(nowMs) {
   requestAnimationFrame(frame);
-  const dt = Math.min(0.05, (nowMs - last) / 1000);
+  const raw = (nowMs - last) / 1000;
+  const dt = Math.min(0.05, raw);
   last = nowMs;
   const interact = input.consumeInteract();
+  LOD.on = !!settings.animLod; LOD.x = player.x; LOD.z = player.z;
+  gfx.tick(raw);
 
   if (running) {
     const paused = panelOpen && !live && where !== 'multi';
@@ -583,7 +634,7 @@ function frame(nowMs) {
     }
     if (isMulti() && input.keys.has('Tab')) hud.setBoard(match.rows(net.getMyId()), match.cfg.teams ? 'TEAMS' : 'SCOREBOARD');
     else hud.setBoard(null);
-    fpsT += dt; fpsN++;
+    fpsT += Math.min(raw, 1); fpsN++; // real frame time (not the clamped sim step)
     if (fpsT >= 0.5) {
       if (settings.showFps) hud.setFps(Math.round(fpsN / fpsT));
       fpsT = fpsN = 0;
@@ -594,19 +645,13 @@ function frame(nowMs) {
     bullets.update(dt);
   }
 
-  renderer.clear();
-  renderer.render(scene, camera);
-  if (running && viewmodel.visible) {
-    renderer.clearDepth();
-    renderer.render(vmScene, vmCamera);
-  }
+  gfx.render(running && viewmodel.visible);
   recorder.frame(nowMs);
 }
 
 addEventListener('resize', () => {
   const w = innerWidth, h = innerHeight;
-  renderer.setPixelRatio(Math.min(devicePixelRatio, isTouch ? 1.5 : 2));
-  renderer.setSize(w, h, false);
+  gfx.resize();
   camera.aspect = vmCamera.aspect = w / h;
   camera.updateProjectionMatrix();
   vmCamera.updateProjectionMatrix();
