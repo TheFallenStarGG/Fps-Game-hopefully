@@ -4,6 +4,7 @@ import { settings, saveSettings } from './lib/settings.js';
 import { createTextures } from './lib/textures.js';
 import { createAudio } from './lib/audio.js';
 import { createWorld } from './lib/scene.js';
+import { createRadar } from './lib/radar.js';
 import { makeHumanoid, makeViewmodel } from './lib/humanoid.js';
 import { createBulletSystem } from './lib/weapons.js';
 import { createHud } from './lib/hud.js';
@@ -63,6 +64,7 @@ const tex = createTextures({ res: settings.texRes, aniso: Math.min(settings.anis
 const audio = createAudio(settings);
 audio.setVolume(settings.volume);
 const world = createWorld(renderer, tex);
+const radar = createRadar(world.pois);
 const scene = world.scene;
 const camera = new THREE.PerspectiveCamera(settings.fov, innerWidth / innerHeight, 0.05, 400);
 scene.add(camera);
@@ -115,7 +117,8 @@ function makeTag(name, color) {
 
 function addRemote(p) {
   if (!p || remotes.has(p.id)) return;
-  const mesh = makeHumanoid(tex, 'remote', p.lk ? decodeLook(p.lk) : null);  scene.add(mesh);
+  const mesh = makeHumanoid(tex, 'remote', p.lk ? decodeLook(p.lk) : null);
+  scene.add(mesh);
   const col = match.cfg.teams ? (p.team && p.team === match.team ? '#4aa8ff' : '#ff6b4a') : '#ffffff';
   const tag = makeTag(p.name || 'Player', col);
   mesh.add(tag);
@@ -538,6 +541,7 @@ chatInput.addEventListener('keydown', (e) => {
 });
 addEventListener('keydown', (e) => {
   if (!running || panelOpen || loadoutOpen || chatFocused()) return;
+  if (canon(e.code) === 'KeyM' && isMulti()) { radar.toggleFull(); return; }
   if (canon(e.code) === 'KeyT' || e.code === 'Enter') {
     e.preventDefault();
     input.clear();
@@ -631,6 +635,7 @@ function frame(nowMs) {
       }
       bullets.update(dt);
       world.update(player.x, player.z, dt);
+      radar.update(player, remotes, dt, isMulti());
     }
     if (isMulti() && input.keys.has('Tab')) hud.setBoard(match.rows(net.getMyId()), match.cfg.teams ? 'TEAMS' : 'SCOREBOARD');
     else hud.setBoard(null);
