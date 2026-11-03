@@ -778,10 +778,40 @@ let live = false;
 const recorder = createRecorder({
   canvas, audio,
   onStatus: (m) => hud.setMsg(m, 2500),
-  getState: () => ({
-    hp: Math.ceil(player.hp), weapon: player.weaponName, kind: player.weaponKind, ammo: player.ammo, reserve: player.reserve,
-    kills: player.kills, deaths: player.deaths, scope: player.scope,
-  }),
+  getState: () => {
+    const slots = ['main', 'side', 'melee'].map((sl) => {
+      const id = (player.slot === sl) ? player.weaponId : null;
+      // names from current equip when active; else label
+      const labels = { main: 'Primary', side: 'Side', melee: 'Melee' };
+      return {
+        id: sl,
+        on: player.slot === sl,
+        name: player.slot === sl ? (player.weaponName || labels[sl]) : labels[sl],
+      };
+    });
+    return {
+      hp: Math.ceil(player.hp),
+      alive: player.alive,
+      weapon: player.weaponName,
+      kind: player.weaponKind,
+      ammo: player.ammo,
+      reserve: player.reserve,
+      kills: player.kills,
+      deaths: player.deaths,
+      scope: player.scope || 0,
+      ads: !!player.ads,
+      adsBlend: player.adsBlend || 0,
+      reloading: !!player.reloading,
+      reloadT: player.reloadT || 0,
+      reloadTotal: player.reloadTotal || 1,
+      crouching: !!player.crouching,
+      sprinting: !!player.sprinting,
+      thirdPerson: !!player.thirdPerson,
+      building: !!player.building,
+      slots,
+      msg: (hud.getMsg && hud.getMsg()) || '',
+    };
+  },
 });
 const _addKill = hud.addKill;
 hud.addKill = (a, b, head) => { recorder.feedKill(a, b, head); _addKill(a, b, head); };
