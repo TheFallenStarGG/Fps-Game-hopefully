@@ -5,6 +5,7 @@ import { createTextures } from './lib/textures.js';
 import { createAudio } from './lib/audio.js';
 import { createWorld } from './lib/scene.js';
 import { createRadar } from './lib/radar.js';
+import { createVehicles } from './lib/vehicles.js';
 import { makeHumanoid, makeViewmodel } from './lib/humanoid.js';
 import { createBulletSystem } from './lib/weapons.js';
 import { createHud } from './lib/hud.js';
@@ -81,6 +82,7 @@ vmScene.add(vmSun);
 const vmCamera = new THREE.PerspectiveCamera(58, innerWidth / innerHeight, 0.01, 10);
 
 const hud = createHud();
+const vehicles = createVehicles({ scene, audio, hud });
 const match = createMatch();
 const bullets = createBulletSystem(scene, tex, {
   onLand: (kind, x, y, z) => audio.play(kind === 'mag' ? 'magDrop' : 'shell', x, z),
@@ -438,7 +440,7 @@ const input = createInput(canvas, {
   getPlayer: () => player,
   isActive: () => running && !panelOpen && !loadoutOpen && !chatFocused(),
   onReload: () => ctrl.startReload(),
-  onToggleCamera: () => ctrl.toggleCamera(),
+  onToggleCamera: () => { if (vehicles.isDriving()) vehicles.toggleDriveCam(); else ctrl.toggleCamera(); },
   onAim: (down) => ctrl.setAim(down),
   onToggleBuild: () => {
     if (!player.canBuild) { hud.setMsg('Building is disabled in the lobby', 1200); return; }
@@ -730,9 +732,21 @@ function frame(nowMs) {
     const paused = panelOpen && !live && where !== 'multi';
     if (!paused) {
       const now = performance.now() / 1000;
+      if (interact) vehicles.tryUse(player);
       ctrl.update(dt);
+      if (vehicles.isDriving()) {
+        vehicles.update(dt, player, {
+          forward: input.keys.has('KeyW') || input.keys.has('ArrowUp'),
+          back: input.keys.has('KeyS') || input.keys.has('ArrowDown'),
+          left: input.keys.has('KeyA') || input.keys.has('ArrowLeft'),
+          right: input.keys.has('KeyD') || input.keys.has('ArrowRight'),
+          jump: input.keys.has('Space'),
+        }, camera);
+      } else {
+        vehicles.update(dt, player, {}, null);
+      }
       if (where === 'lobby') {
-        const act = lobby.update(dt, player, interact);
+        const act = lobby.update(dt, player, vehicles.isDriving() ? false : interact);
         hud.setPrompt(joining ? { text: 'Searching for a match…', sub: 'Hang tight', progress: 0 } : lobby.prompt);
         if (act && act.type === 'portal' && !joining) enterPortal(act.mode);
         updateRemotes(dt);
