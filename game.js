@@ -297,6 +297,10 @@ const net = createNet({
       const b = byId.get(e.serverId);
       if (!b) continue;
       e.sx = b.x; e.sy = b.y; e.sz = b.z; e.syaw = b.yaw;
+      e.sMoving = !!b.moving;
+      e.sAds = !!b.ads;
+      e.sReloading = !!b.reloading;
+      e.sAmmo = b.ammo;
       e.hp = b.hp;
       const was = e.alive;
       e.alive = !!b.alive;
@@ -310,6 +314,12 @@ const net = createNet({
     const d = new THREE.Vector3(msg.dx || 0, msg.dy || 0, msg.dz || 1).normalize();
     bullets.spawn(o, d, 150, true);
     audio.play('shot', msg.x, msg.z, { enemy: true, snd: 'stinger' });
+    for (const e of enemies) {
+      if (e.serverId === msg.id && e.mesh) {
+        try { triggerShootKick(e.mesh.userData); } catch (_) {}
+        break;
+      }
+    }
   },
   onFull() { joining = false; hud.setMsg('That room is full', 2200); },
   onClose() {
