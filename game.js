@@ -450,6 +450,7 @@ ctrl = createPlayerController({
   getEnemies: () => (where === 'bots' ? enemies : []),
   getRemotes: () => remotes,
   isMulti,
+  isBots: () => where === 'bots',
   isFrozen: () => isMulti() && match.frozen,
   isTouch,
   isFriend: (c) => !!(c.remote && match.cfg.teams && c.team && c.team === match.team),
