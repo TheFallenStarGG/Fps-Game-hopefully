@@ -292,6 +292,7 @@ const net = createNet({
   onBots(msg) {
     if (where !== 'bots' || !msg.list) return;
     const byId = new Map(msg.list.map((b) => [b.id, b]));
+    const now = performance.now() / 1000;
     for (const e of enemies) {
       if (!e.serverSide || !e.serverId) continue;
       const b = byId.get(e.serverId);
@@ -301,7 +302,13 @@ const net = createNet({
       e.sAds = !!b.ads;
       e.sReloading = !!b.reloading;
       e.sAmmo = b.ammo;
-      e.hp = b.hp;
+      // Never let a laggy snapshot heal a bot we just shot
+      const recentHurt = e.lastHurt && (now - e.lastHurt) < 0.6;
+      if (!b.alive) {
+        e.hp = 0;
+      } else if (!recentHurt || b.hp < e.hp) {
+        e.hp = b.hp;
+      }
       const was = e.alive;
       e.alive = !!b.alive;
       if (!e.alive && was) { e.deathT = 0; audio.play('death', e.x, e.z); }
@@ -358,13 +365,14 @@ const lobby = createLobby(scene, tex, {
 
 // ---------- bots ----------
 const enemyCtx = {
-  bullets, audio, hud, player, enemies, build, net, net: null,
+  bullets, audio, hud, player, enemies, build, net,
   onPlayerHit: (dmg, sx, sz, zone, name) => { if (where === 'bots' && running) ctrl.applyDamage(dmg, sx, sz, name); },
   onBotKill: (killer, victim, head) => {
     if (where !== 'bots') return;
     hud.addKill(killer.name, victim.name, head);
   },
 };
+
 const MAX_ARENA_BOTS = 40;
 for (let i = 0; i < MAX_ARENA_BOTS; i++) {
   const m = makeHumanoid(tex, 'enemy');
@@ -391,6 +399,7 @@ function setupArenaFromSettings() {
     }
   });
   enemyCtx.enemies = enemies;
+  enemyCtx.net = net;
   if (where === 'bots') {
     for (const e of enemies) respawnEnemy(e);
   }
