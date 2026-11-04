@@ -809,7 +809,7 @@ addEventListener('resize', () => {
 let live = false;
 const recorder = createRecorder({
   canvas, audio,
-  onStatus: (m) => hud.setMsg(m, 2500),
+  onStatus: (m) => hud.setMsg(m, 5000),
   getState: () => {
     const slots = ['main', 'side', 'melee'].map((sl) => {
       const id = (player.slot === sl) ? player.weaponId : null;
