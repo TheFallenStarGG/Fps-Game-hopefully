@@ -215,6 +215,7 @@ const net = createNet({
     where = 'multi';
     joining = false;
     lobby.setActive(false);
+    vehicles.resetAll(player);
     for (const e of allEnemies) e.mesh.visible = false;
     build.clear();
     player.canBuild = true;
@@ -336,7 +337,13 @@ const net = createNet({
     else if (where === 'lobby' && running) { clearRemotes(); joinGlobalLobby(); }
   },
   onError(reason) { joining = false; hud.setMsg(reason || 'Connection error', 2500); },
+  onVeh(msg) { vehicles.onVeh(msg); },
+  onVehExit(msg) { vehicles.onVehExit(msg); },
+  onVehClaim(msg) { vehicles.onVehClaim(msg); },
+  onVehDeny(msg) { vehicles.onVehDeny(msg); },
+  onVehReset() { vehicles.onVehReset(); },
 });
+vehicles.setNet(net);
 
 function onLobbyWelcome(msg) {
   clearRemotes();
@@ -483,6 +490,7 @@ function joinGlobalLobby() {
 
 function enterLobby(msg) {
   where = 'lobby';
+  vehicles.resetAll(player);
   joining = false;
   net.disconnect();
   clearRemotes();
@@ -505,6 +513,7 @@ function enterLobby(msg) {
 
 async function startBots() {
   where = 'bots';
+  vehicles.resetAll(player);
   lobby.setActive(false);
   build.clear();
   match.begin('bots');
