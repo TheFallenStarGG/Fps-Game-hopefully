@@ -6,6 +6,7 @@ import { createAudio } from './lib/audio.js';
 import { createWorld } from './lib/scene.js';
 import { createRadar } from './lib/radar.js';
 import { createVehicles } from './lib/vehicles.js';
+import { createDrone } from './lib/drone.js';
 import { makeHumanoid, makeViewmodel } from './lib/humanoid.js';
 import { createBulletSystem } from './lib/weapons.js';
 import { createHud } from './lib/hud.js';
@@ -83,6 +84,7 @@ const vmCamera = new THREE.PerspectiveCamera(58, innerWidth / innerHeight, 0.01,
 
 const hud = createHud();
 const vehicles = createVehicles({ scene, audio, hud });
+const drone = createDrone({ scene, hud, isTouch });
 const match = createMatch();
 const bullets = createBulletSystem(scene, tex, {
   onLand: (kind, x, y, z) => audio.play(kind === 'mag' ? 'magDrop' : 'shell', x, z),
@@ -447,7 +449,7 @@ const input = createInput(canvas, {
   getPlayer: () => player,
   isActive: () => running && !panelOpen && !loadoutOpen && !chatFocused(),
   onReload: () => ctrl.startReload(),
-  onToggleCamera: () => { if (vehicles.isDriving()) vehicles.toggleDriveCam(); else ctrl.toggleCamera(); },
+  onToggleCamera: () => { if (drone.isFlying()) drone.toggleView(); else if (vehicles.isDriving()) vehicles.toggleDriveCam(); else ctrl.toggleCamera(); },
   onAim: (down) => ctrl.setAim(down),
   onToggleBuild: () => {
     if (!player.canBuild) { hud.setMsg('Building is disabled in the lobby', 1200); return; }
@@ -464,7 +466,7 @@ function onBuildTier() {
 }
 
 ctrl = createPlayerController({
-  scene, camera, playerMesh, viewmodel, player, input, bullets, hud, audio, build, world, net,
+  scene, camera, playerMesh, viewmodel, player, input, bullets, hud, audio, build, world, net, drone,
   getEnemies: () => (where === 'bots' ? enemies : []),
   getRemotes: () => remotes,
   isMulti,
@@ -741,8 +743,10 @@ function frame(nowMs) {
     const paused = panelOpen && !live && where !== 'multi';
     if (!paused) {
       const now = performance.now() / 1000;
-      if (interact) vehicles.tryUse(player);
+      if (interact && drone.isFlying()) drone.recall();
+      else if (interact) vehicles.tryUse(player);
       ctrl.update(dt);
+      if (!player.alive && drone.isActive()) drone.recall();
       if (vehicles.isDriving()) {
         vehicles.update(dt, player, {
           forward: input.keys.has('KeyW') || input.keys.has('ArrowUp'),
