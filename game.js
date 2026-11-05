@@ -582,8 +582,8 @@ function closePanel() {
   if (running) lockPointer();
 }
 
-const describe = (d) => (d.kind === 'melee' ? d.blurb : `${d.mag}/${d.total} ammo · ${Math.round(60 / d.cd)} rpm · ${reloadDuration(d, d.mag).toFixed(1)}s reload`);
-const SLOT_LABEL = { main: 'MAIN', side: 'SECONDARY', melee: 'MELEE' };
+const describe = (d) => ((d.kind === 'melee' || d.kind === 'utility') ? (d.blurb || d.name) : `${d.mag}/${d.total} ammo · ${Math.round(60 / d.cd)} rpm · ${reloadDuration(d, d.mag).toFixed(1)}s reload`);
+const SLOT_LABEL = { main: 'PRIMARY', side: 'SECONDARY', melee: 'MELEE', utility: 'UTILITY' };
 function renderLoadout() {
   const grid = $('loadoutGrid');
   grid.textContent = '';
@@ -815,10 +815,9 @@ const recorder = createRecorder({
   canvas, audio,
   onStatus: (m) => hud.setMsg(m, 5000),
   getState: () => {
-    const slots = ['main', 'side', 'melee'].map((sl) => {
+    const slots = ['main', 'side', 'melee', 'utility'].map((sl) => {
       const id = (player.slot === sl) ? player.weaponId : null;
-      // names from current equip when active; else label
-      const labels = { main: 'Primary', side: 'Side', melee: 'Melee' };
+      const labels = { main: 'Primary', side: 'Side', melee: 'Melee', utility: 'Utility' };
       return {
         id: sl,
         on: player.slot === sl,
