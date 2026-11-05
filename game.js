@@ -51,6 +51,7 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} },
 };
 nameInput.value = store.get('rr.name', '');
+try { checkCallsign(nameInput.value); } catch (_) {}
 roomInput.value = store.get('rr.room', '');
 
 let where = 'lobby'; // 'lobby' | 'bots' | 'multi'
@@ -521,6 +522,10 @@ dropship = createDropship({ scene, camera, playerMesh, viewmodel, player, input,
 
 bindDev({
   hud,
+  onUnlock() {
+    if (lobby && lobby.enableDevPortal) lobby.enableDevPortal();
+    refreshDevUI();
+  },
   heal() { player.hp = player.maxHp; player.alive = true; hud.setHp(player.hp, player.maxHp); hud.setMsg('Full heal', 1200); },
   restock() { if (ctrl.restock) ctrl.restock(); else if (ctrl.refreshLoadout) ctrl.refreshLoadout(); hud.setMsg('Loadout restocked', 1200); },
   buildWall() {
