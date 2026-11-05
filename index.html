@@ -354,6 +354,24 @@ body.in-vehicle #hpWrap { opacity:.35; }
 <script>
 /* Error overlay is installed by lib/dev.js after settings load — off by default. */
 </script>
+<script>
+/* Gate model-load console spam before modules run. Opt-in via settings after unlock. */
+(function () {
+  var showLogs = false;
+  try {
+    var s = JSON.parse(localStorage.getItem('realmrange.settings.v2') || '{}');
+    var unlocked = localStorage.getItem('rift.dev.unlocked') === '1';
+    showLogs = !!(unlocked && s.devShowLoadLogs);
+  } catch (e) {}
+  var ri = console.info.bind(console), rw = console.warn.bind(console);
+  function quiet(args) {
+    var a = String(args[0] || '');
+    return a.indexOf('[rifleman]') >= 0 || a.indexOf('[humanoid]') >= 0 || a.indexOf('[hand]') >= 0;
+  }
+  console.info = function () { if (!quiet(arguments) || showLogs) ri.apply(console, arguments); };
+  console.warn = function () { if (!quiet(arguments) || showLogs) rw.apply(console, arguments); };
+})();
+</script>
 <script type="importmap">
 {
   "imports": {
