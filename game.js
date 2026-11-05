@@ -62,6 +62,16 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.autoClear = false;
+// Surface GPU crashes instead of a silent tab close
+canvas.addEventListener('webglcontextlost', (e) => {
+  e.preventDefault();
+  try {
+    const msg = document.createElement('div');
+    msg.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:#0a0c10;color:#eef2f7;font:600 16px system-ui;text-align:center;padding:24px';
+    msg.innerHTML = '<div><p style="margin:0 0 12px">Graphics crashed (GPU reset).</p><p style="margin:0 0 16px;opacity:.8">Reload with safer settings:</p><a href="?safe" style="color:#ffc247">Open with ?safe</a></div>';
+    document.body.appendChild(msg);
+  } catch (_) {}
+}, false);
 
 const tex = createTextures({ res: settings.texRes, aniso: Math.min(settings.aniso, renderer.capabilities.getMaxAnisotropy()) });
 const audio = createAudio(settings);
@@ -157,6 +167,7 @@ function remoteEvent(r, name, info) {
 }
 
 function updateRemotes(dt) {
+  if (remotes.size === 0) return;
   for (const r of remotes.values()) {
     const dx = r.tx - r.x, dz = r.tz - r.z, dy = r.ty - r.y;
     if (Math.hypot(dx, dz, dy) > 8) { r.x = r.tx; r.y = r.ty; r.z = r.tz; }
@@ -184,8 +195,8 @@ function updateRemotes(dt) {
 
 function refreshPlayerList() {
   if (!isMulti()) { playerListEl.textContent = ''; return; }
-  const lines = [`You — ${Math.round(player.hp)} hp`];
-  for (const r of remotes.values()) lines.push(`${r.name} — ${r.alive ? Math.round(r.hp) + ' hp' : 'down'}`);
+  const lines = [`You â€” ${Math.round(player.hp)} hp`];
+  for (const r of remotes.values()) lines.push(`${r.name} â€” ${r.alive ? Math.round(r.hp) + ' hp' : 'down'}`);
   playerListEl.textContent = lines.join('\n');
 }
 
@@ -353,7 +364,7 @@ function onLobbyWelcome(msg) {
   chatLog.textContent = '';
   for (const c of msg.chat || []) appendChat(c);
   net.startStateLoop(() => player);
-  hud.setMsg(`Global lobby · ${(msg.players || []).length + 1} online`, 2200);
+  hud.setMsg(`Global lobby Â· ${(msg.players || []).length + 1} online`, 2200);
 }
 
 // ---------- building ----------
@@ -385,20 +396,24 @@ const enemyCtx = {
 };
 
 const MAX_ARENA_BOTS = 40;
-for (let i = 0; i < MAX_ARENA_BOTS; i++) {
-  const m = makeHumanoid(tex, 'enemy');
-  m.visible = false;
-  scene.add(m);
-  const e = createEnemy(m, enemyCtx, i);
-  enemies.push(e);
-  allEnemies.push(e);
-  m.visible = false;
+/** Create bot humanoids only when needed (Bot Arena / roster size), not on every page load. */
+function ensureBotPool(n) {
+  const want = Math.max(0, Math.min(MAX_ARENA_BOTS, n | 0));
+  while (allEnemies.length < want) {
+    const i = allEnemies.length;
+    const m = makeHumanoid(tex, 'enemy');
+    m.visible = false;
+    scene.add(m);
+    const e = createEnemy(m, enemyCtx, i);
+    allEnemies.push(e);
+  }
 }
 
 /** Build Bot Arena roster from team/size/leader settings. */
 function setupArenaFromSettings() {
   const cfg = clampArenaCfg(settings);
   const roles = assignRoles(cfg);
+  ensureBotPool(roles.length);
   enemies.length = 0;
   allEnemies.forEach((e, i) => {
     if (i < roles.length) {
@@ -524,6 +539,7 @@ async function startBots() {
   hud.setScore(0, 0);
   if (typeof setupArenaFromSettings === 'function') setupArenaFromSettings();
   else {
+    ensureBotPool(12);
     for (const e of enemies) { e.mesh.visible = true; }
   }
   ctrl.respawn();
@@ -533,16 +549,16 @@ async function startBots() {
   }
   const cfg = typeof clampArenaCfg === 'function' ? clampArenaCfg(settings) : { teams: 2, size: 6, leaders: 1 };
   hud.setMode('bots');
-  hud.setMsg(`Bot Arena — connecting followers to server…`, 2000);
+  hud.setMsg(`Bot Arena â€” connecting followers to serverâ€¦`, 2000);
   const room = 'bots-' + Math.random().toString(36).slice(2, 8);
   const ok = await net.connect(room, 'Player', 'bots', loadoutString(), {
     teams: cfg.teams, size: cfg.size, leaders: cfg.leaders,
   });
   if (ok) {
     net.startStateLoop(() => player);
-    hud.setMsg(`Bot Arena — ${cfg.teams} teams × ${cfg.size} (${cfg.leaders} leaders client / rest server)`, 3500);
+    hud.setMsg(`Bot Arena â€” ${cfg.teams} teams Ã— ${cfg.size} (${cfg.leaders} leaders client / rest server)`, 3500);
   } else {
-    hud.setMsg('Server followers unavailable — local followers fallback', 3500);
+    hud.setMsg('Server followers unavailable â€” local followers fallback', 3500);
     for (const e of enemies) { e.serverSide = false; if (!e.isLeader) respawnEnemy(e); }
   }
 }
@@ -552,13 +568,13 @@ async function startOnline(modeId) {
   if (WORKER_URL.includes('YOUR_SUBDOMAIN')) { hud.setMsg('Set WORKER_URL in lib/net.js first', 3000); return; }
   joining = true;
   const code = roomInput.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24);
-  hud.setMsg(code ? `Joining room “${code}”…` : `Finding a ${MODES[modeId].name} match…`, 0);
+  hud.setMsg(code ? `Joining room â€œ${code}â€â€¦` : `Finding a ${MODES[modeId].name} matchâ€¦`, 0);
   let ok;
   if (code) ok = await net.connect(code, myName, modeId, loadoutString());
-  else ok = !!(await net.join(modeId, myName, loadoutString(), { onTry: (n) => hud.setMsg(`Searching… room ${n}`, 0) }));
+  else ok = !!(await net.join(modeId, myName, loadoutString(), { onTry: (n) => hud.setMsg(`Searchingâ€¦ room ${n}`, 0) }));
   if (!ok) {
     joining = false;
-    hud.setMsg('No match found — try again', 2500);
+    hud.setMsg('No match found â€” try again', 2500);
     if (where === 'lobby') joinGlobalLobby();
   }
 }
@@ -582,7 +598,7 @@ function closePanel() {
   if (running) lockPointer();
 }
 
-const describe = (d) => ((d.kind === 'melee' || d.kind === 'utility') ? (d.blurb || d.name) : `${d.mag}/${d.total} ammo · ${Math.round(60 / d.cd)} rpm · ${reloadDuration(d, d.mag).toFixed(1)}s reload`);
+const describe = (d) => ((d.kind === 'melee' || d.kind === 'utility') ? (d.blurb || d.name) : `${d.mag}/${d.total} ammo Â· ${Math.round(60 / d.cd)} rpm Â· ${reloadDuration(d, d.mag).toFixed(1)}s reload`);
 const SLOT_LABEL = { main: 'PRIMARY', side: 'SECONDARY', melee: 'MELEE', utility: 'UTILITY' };
 function renderLoadout() {
   const grid = $('loadoutGrid');
@@ -698,8 +714,8 @@ function bindCheck(id, key, apply) {
     saveSettings();
   });
 }
-bindRange('setSens', 'sens', (v) => v.toFixed(2) + '×');
-bindRange('setFov', 'fov', (v) => Math.round(v) + '°');
+bindRange('setSens', 'sens', (v) => v.toFixed(2) + 'Ã—');
+bindRange('setFov', 'fov', (v) => Math.round(v) + 'Â°');
 bindRange('setVol', 'volume', (v) => Math.round(v * 100) + '%', () => audio.setVolume(settings.volume));
 bindCheck('setAdsToggle', 'adsToggle');
 bindCheck('setInvert', 'invertY');
@@ -760,7 +776,7 @@ function frame(nowMs) {
       }
       if (where === 'lobby') {
         const act = lobby.update(dt, player, vehicles.isDriving() ? false : interact);
-        hud.setPrompt(joining ? { text: 'Searching for a match…', sub: 'Hang tight', progress: 0 } : lobby.prompt);
+        hud.setPrompt(joining ? { text: 'Searching for a matchâ€¦', sub: 'Hang tight', progress: 0 } : lobby.prompt);
         if (act && act.type === 'portal' && !joining) enterPortal(act.mode);
         updateRemotes(dt);
       } else {
