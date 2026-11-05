@@ -28,6 +28,11 @@ import { look, applyLook, decodeLook } from './lib/look.js';
 import { canon } from './lib/keybinds.js';
 import { createGfx } from './lib/gfx.js';
 import { createDropship } from './lib/dropship.js';
+import {
+  devUnlocked, tryUnlock, checkCallsign, bindDev, mountDevSettingsSection,
+  installErrorOverlay, refreshDevUI, showBar, hideBar, setFly,
+  fillSpawnButtons, infiniteAmmo,
+} from './lib/dev.js';
 
 // let the loading card paint before the big map is built
 await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 30)));
@@ -99,6 +104,7 @@ vmScene.add(vmSun);
 const vmCamera = new THREE.PerspectiveCamera(58, innerWidth / innerHeight, 0.01, 10);
 
 const hud = createHud();
+
 const vehicles = createVehicles({ scene, audio, hud });
 const drone = createDrone({ scene, hud, isTouch });
 const match = createMatch();
@@ -512,6 +518,60 @@ hud.onBuildPick = (i) => ctrl.digit(i);
 hud.onTier = onBuildTier;
 
 dropship = createDropship({ scene, camera, playerMesh, viewmodel, player, input, audio, hud, world, tex, bullets, isTouch });
+
+bindDev({
+  hud,
+  heal() { player.hp = player.maxHp; player.alive = true; hud.setHp(player.hp, player.maxHp); hud.setMsg('Full heal', 1200); },
+  restock() { if (ctrl.restock) ctrl.restock(); else if (ctrl.refreshLoadout) ctrl.refreshLoadout(); hud.setMsg('Loadout restocked', 1200); },
+  buildWall() {
+    const f = { x: -Math.sin(player.yaw), z: -Math.cos(player.yaw) };
+    build.place({ type: 'wall', x: Math.round((player.x + f.x * 4) / 4) * 4, y: Math.floor(player.y / 4) * 4, z: Math.round((player.z + f.z * 4) / 4) * 4, rot: Math.round(player.yaw / (Math.PI / 2)) % 4 });
+    hud.setMsg('Wall', 800);
+  },
+  buildRamp() {
+    const f = { x: -Math.sin(player.yaw), z: -Math.cos(player.yaw) };
+    build.place({ type: 'ramp', x: Math.round((player.x + f.x * 4) / 4) * 4, y: Math.floor(player.y / 4) * 4, z: Math.round((player.z + f.z * 4) / 4) * 4, rot: Math.round(player.yaw / (Math.PI / 2)) % 4 });
+    hud.setMsg('Ramp', 800);
+  },
+  buildFloor() {
+    const f = { x: -Math.sin(player.yaw), z: -Math.cos(player.yaw) };
+    build.place({ type: 'floor', x: Math.round((player.x + f.x * 4) / 4) * 4, y: Math.floor(player.y / 4) * 4, z: Math.round((player.z + f.z * 4) / 4) * 4, rot: 0 });
+    hud.setMsg('Floor', 800);
+  },
+  clearBuilds() { build.clear(); hud.setMsg('Builds cleared', 1200); },
+  bot() {
+    ensureBotPool(Math.min(12, (enemies.length || 0) + 1));
+    for (const e of allEnemies) {
+      if (!e.mesh.visible) { e.mesh.visible = true; if (typeof respawnEnemy === 'function') respawnEnemy(e); break; }
+    }
+    hud.setMsg('Bot spawned', 1000);
+  },
+  killBots() {
+    for (const e of allEnemies) { e.mesh.visible = false; e.alive = false; }
+    hud.setMsg('Bots cleared', 1000);
+  },
+  lobby() { enterLobby('Left developer sandbox'); },
+  spawn(spec) {
+    if (spec.startsWith('weapon:')) {
+      const id = spec.slice(7);
+      const def = ALL[id];
+      if (!def) return;
+      const slot = def.slot || 'main';
+      if (typeof setSlot === 'function') setSlot(slot, id);
+      if (ctrl.refreshLoadout) ctrl.refreshLoadout();
+      if (ctrl.equip) ctrl.equip(slot);
+      hud.setMsg('Equipped ' + (def.name || id), 1200);
+    } else if (spec.startsWith('vehicle:')) {
+      hud.setMsg('Vehicles: use the ones on the map (E)', 1800);
+    }
+  },
+});
+fillSpawnButtons(['jeep', 'truck', 'tank'], ['vanguard', 'stinger', 'breacher', 'p9', 'sledge', 'drone']);
+if (devUnlocked() && lobby.enableDevPortal) lobby.enableDevPortal();
+installErrorOverlay();
+mountDevSettingsSection();
+refreshDevUI();
+
 function startDrop() {
   if (!DROP_ENABLED || !dropship) return;
   dropship.begin({ bound: DROP_BOUND, accent: where === 'bots' ? 0xff4d6a : 0xff8a2b });
@@ -530,6 +590,9 @@ function joinGlobalLobby() {
 
 function enterLobby(msg) {
   if (dropship) dropship.cancel();
+  hideBar();
+  setFly(false);
+  if (devUnlocked() && lobby.enableDevPortal) lobby.enableDevPortal();
   where = 'lobby';
   vehicles.resetAll(player);
   joining = false;
@@ -550,6 +613,31 @@ function enterLobby(msg) {
   playerListEl.textContent = '';
   if (msg) hud.setMsg(msg, 2500);
   if (running) joinGlobalLobby();
+}
+
+
+function startDev() {
+  if (!devUnlocked()) {
+    hud.setMsg('Developer mode locked', 2000);
+    return;
+  }
+  if (dropship) dropship.cancel();
+  where = 'dev';
+  vehicles.resetAll(player);
+  lobby.setActive(false);
+  build.clear();
+  match.begin('bots');
+  player.canBuild = true;
+  player.kills = player.deaths = 0;
+  hud.setScore(0, 0);
+  ensureBotPool(4);
+  for (const e of allEnemies) e.mesh.visible = false;
+  ctrl.respawn();
+  setFly(true);
+  showBar();
+  hud.setMode('dev');
+  hud.setMsg('Developer sandbox — fly ON', 2500);
+  lockPointer();
 }
 
 async function startBots() {
@@ -605,7 +693,11 @@ async function startOnline(modeId) {
   }
 }
 
-const enterPortal = (id) => (id === 'bots' ? startBots() : startOnline(id));
+const enterPortal = (id) => {
+  if (id === 'dev') return startDev();
+  if (id === 'bots') return startBots();
+  return startOnline(id);
+};
 
 // ---------- panels ----------
 function openPanel() {
@@ -672,6 +764,9 @@ btnStart.addEventListener('click', () => {
   audio.unlock();
   myName = (nameInput.value || 'Player').trim().slice(0, 20) || 'Player';
   store.set('rr.name', nameInput.value.trim());
+  checkCallsign(myName);
+  if (devUnlocked() && lobby.enableDevPortal) lobby.enableDevPortal();
+  refreshDevUI();
   running = true;
   last = performance.now();
   startEl.classList.add('hide');
@@ -790,6 +885,7 @@ function frame(nowMs) {
       else if (interact && !dropping) vehicles.tryUse(player);
       if (dropping) dropship.update(dt);
       else { dropship.tick(dt); ctrl.update(dt); }
+      if (infiniteAmmo() && player.alive) { player.ammo = player.magSize; }
       if (!player.alive && drone.isActive()) drone.recall();
       if (vehicles.isDriving()) {
         vehicles.update(dt, player, {
