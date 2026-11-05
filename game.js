@@ -27,6 +27,7 @@ import { applyLayout } from './lib/layout.js';
 import { look, applyLook, decodeLook } from './lib/look.js';
 import { canon } from './lib/keybinds.js';
 import { createGfx } from './lib/gfx.js';
+import { createDropship } from './lib/dropship.js';
 
 // let the loading card paint before the big map is built
 await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 30)));
@@ -53,6 +54,11 @@ let myName = 'Player', last = performance.now(), fpsT = 0, fpsN = 0, listT = 0;
 const chatFocused = () => document.activeElement === chatInput;
 const lockPointer = () => { if (!isTouch) { try { canvas.requestPointerLock(); } catch (_) {} } };
 const isMulti = () => where === 'multi';
+
+// ---------- hot drop intro (lib/dropship.js) ----------
+const DROP_BOUND = 290; // the worker clamps players to ±298 (BOUND in worker/src/index.js): keep the drop zone inside it
+const DROP_ENABLED = !/[?&]nodrop\b/.test(location.search); // add ?nodrop to the URL to skip the plane
+let dropship = null;
 
 // ---------- renderer / world ----------
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isTouch && settings.aa, powerPreference: 'high-performance' });
@@ -109,6 +115,10 @@ viewmodel.visible = false;
 vmScene.add(viewmodel);
 applyLook(viewmodel, look, tex);
 const player = createPlayerState();
+// what the bots see: while you're in the plane / skydiving high up you simply don't exist to them
+const enemyView = new Proxy(player, {
+  get: (t, k) => (k === 'alive' ? t.alive && !(dropship && dropship.airborne()) : t[k]),
+});
 const enemies = []; // active bots
 const allEnemies = []; // full pool
 const remotes = new Map();
@@ -227,6 +237,7 @@ const net = createNet({
     }
     where = 'multi';
     joining = false;
+    if (dropship) dropship.cancel();
     lobby.setActive(false);
     vehicles.resetAll(player);
     for (const e of allEnemies) e.mesh.visible = false;
@@ -242,6 +253,7 @@ const net = createNet({
     player.kills = player.deaths = 0;
     hud.setScore(0, 0);
     ctrl.respawnAt(msg.spawn);
+    if (!match.cfg.teams) startDrop(); // Free For All: hot drop from the plane
     net.startStateLoop(() => player);
     hud.setMode('multi');
     hud.setMsg(match.cfg.name, 2200);
@@ -274,6 +286,7 @@ const net = createNet({
     if (r) triggerMelee(r.mesh, msg.thrown ? 'throw' : 'swing');
   },
   onDamage(msg) {
+    if (dropship && dropship.airborne()) return; // nothing can touch you up there
     const src = remotes.get(msg.from);
     ctrl.syncHp(msg.hp, msg.alive, src ? src.x : undefined, src ? src.z : undefined);
   },
@@ -296,7 +309,10 @@ const net = createNet({
     if (mine) { player.kills = mine.k; player.deaths = mine.d; hud.setScore(mine.k, mine.d); }
   },
   onPhase(msg) { match.apply(msg); },
-  onSpawn(msg) { ctrl.respawnAt(msg); },
+  onSpawn(msg) {
+    if (dropship && dropship.active()) return; // the server's round-start spawn must not yank you out of the plane
+    ctrl.respawnAt(msg);
+  },
   onRespawnIn(ms) { ctrl.queueRespawn(ms); },
   onChat(msg) { appendChat(msg); },
   onBuild(ev) {
@@ -387,7 +403,7 @@ const lobby = createLobby(scene, tex, {
 
 // ---------- bots ----------
 const enemyCtx = {
-  bullets, audio, hud, player, enemies, build, net,
+  bullets, audio, hud, player: enemyView, enemies, build, net,
   onPlayerHit: (dmg, sx, sz, zone, name) => { if (where === 'bots' && running) ctrl.applyDamage(dmg, sx, sz, name); },
   onBotKill: (killer, victim, head) => {
     if (where !== 'bots') return;
@@ -464,16 +480,17 @@ const input = createInput(canvas, {
   getPlayer: () => player,
   isActive: () => running && !panelOpen && !loadoutOpen && !chatFocused(),
   onReload: () => ctrl.startReload(),
-  onToggleCamera: () => { if (drone.isFlying()) drone.toggleView(); else if (vehicles.isDriving()) vehicles.toggleDriveCam(); else ctrl.toggleCamera(); },
+  onToggleCamera: () => { if (dropship && dropship.active()) return; if (drone.isFlying()) drone.toggleView(); else if (vehicles.isDriving()) vehicles.toggleDriveCam(); else ctrl.toggleCamera(); },
   onAim: (down) => ctrl.setAim(down),
   onToggleBuild: () => {
+    if (dropship && dropship.active()) return;
     if (!player.canBuild) { hud.setMsg('Building is disabled in the lobby', 1200); return; }
     ctrl.toggleBuild();
   },
   onBuildTier,
-  onQuickMelee: () => ctrl.quickMelee(),
-  onDigit: (i) => ctrl.digit(i),
-  onScroll: (d) => ctrl.scroll(d),
+  onQuickMelee: () => { if (!(dropship && dropship.active())) ctrl.quickMelee(); },
+  onDigit: (i) => { if (!(dropship && dropship.active())) ctrl.digit(i); },
+  onScroll: (d) => { if (!(dropship && dropship.active())) ctrl.scroll(d); },
 });
 function onBuildTier() {
   if (!player.building) return;
@@ -494,6 +511,12 @@ hud.onSlot = (i) => ctrl.digit(i);
 hud.onBuildPick = (i) => ctrl.digit(i);
 hud.onTier = onBuildTier;
 
+dropship = createDropship({ scene, camera, playerMesh, viewmodel, player, input, audio, hud, world, tex, bullets, isTouch });
+function startDrop() {
+  if (!DROP_ENABLED || !dropship) return;
+  dropship.begin({ bound: DROP_BOUND, accent: where === 'bots' ? 0xff4d6a : 0xff8a2b });
+}
+
 // ---------- game flow ----------
 function refreshSlotsUI() {
   hud.setSlots(SLOTS.map((s, i) => ({ key: String(i + 1), name: ALL[loadout[s]].name })));
@@ -506,6 +529,7 @@ function joinGlobalLobby() {
 }
 
 function enterLobby(msg) {
+  if (dropship) dropship.cancel();
   where = 'lobby';
   vehicles.resetAll(player);
   joining = false;
@@ -529,6 +553,7 @@ function enterLobby(msg) {
 }
 
 async function startBots() {
+  if (dropship) dropship.cancel();
   where = 'bots';
   vehicles.resetAll(player);
   lobby.setActive(false);
@@ -547,6 +572,7 @@ async function startBots() {
     if (e.isLeader) respawnEnemy(e);
     else { e.mesh.visible = true; e.alive = true; e.hp = e.maxHp; }
   }
+  startDrop(); // Bot Arena: hot drop from the plane
   const cfg = typeof clampArenaCfg === 'function' ? clampArenaCfg(settings) : { teams: 2, size: 6, leaders: 1 };
   hud.setMode('bots');
   hud.setMsg(`Bot Arena â€” connecting followers to serverâ€¦`, 2000);
@@ -759,9 +785,11 @@ function frame(nowMs) {
     const paused = panelOpen && !live && where !== 'multi';
     if (!paused) {
       const now = performance.now() / 1000;
+      const dropping = dropship.active();
       if (interact && drone.isFlying()) drone.recall();
-      else if (interact) vehicles.tryUse(player);
-      ctrl.update(dt);
+      else if (interact && !dropping) vehicles.tryUse(player);
+      if (dropping) dropship.update(dt);
+      else { dropship.tick(dt); ctrl.update(dt); }
       if (!player.alive && drone.isActive()) drone.recall();
       if (vehicles.isDriving()) {
         vehicles.update(dt, player, {
@@ -786,7 +814,7 @@ function frame(nowMs) {
         } else {
           updateRemotes(dt);
           match.tick(dt);
-          hud.setBanner(match.banner());
+          hud.setBanner(dropship.active() ? null : match.banner());
           hud.setStatus(match.status());
           listT -= dt;
           if (listT <= 0) { listT = 0.25; refreshPlayerList(); }
