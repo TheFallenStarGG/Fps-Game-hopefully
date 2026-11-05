@@ -526,56 +526,82 @@ bindDev({
     if (lobby && lobby.enableDevPortal) lobby.enableDevPortal();
     refreshDevUI();
   },
-  heal() { player.hp = player.maxHp; player.alive = true; hud.setHp(player.hp, player.maxHp); hud.setMsg('Full heal', 1200); },
-  restock() { if (ctrl.restock) ctrl.restock(); else if (ctrl.refreshLoadout) ctrl.refreshLoadout(); hud.setMsg('Loadout restocked', 1200); },
-  buildWall() {
-    const f = { x: -Math.sin(player.yaw), z: -Math.cos(player.yaw) };
-    build.place({ type: 'wall', x: Math.round((player.x + f.x * 4) / 4) * 4, y: Math.floor(player.y / 4) * 4, z: Math.round((player.z + f.z * 4) / 4) * 4, rot: Math.round(player.yaw / (Math.PI / 2)) % 4 });
-    hud.setMsg('Wall', 800);
+  heal() {
+    player.hp = player.maxHp;
+    player.alive = true;
+    hud.setMsg('Full heal', 1200);
   },
-  buildRamp() {
-    const f = { x: -Math.sin(player.yaw), z: -Math.cos(player.yaw) };
-    build.place({ type: 'ramp', x: Math.round((player.x + f.x * 4) / 4) * 4, y: Math.floor(player.y / 4) * 4, z: Math.round((player.z + f.z * 4) / 4) * 4, rot: Math.round(player.yaw / (Math.PI / 2)) % 4 });
-    hud.setMsg('Ramp', 800);
+  restock() {
+    player.ammo = player.magSize || 30;
+    const def = ALL[player.weaponId];
+    player.reserve = def && def.total != null ? def.total : 120;
+    if (ctrl.refreshLoadout) ctrl.refreshLoadout();
+    hud.setMsg('Restocked', 1200);
   },
-  buildFloor() {
-    const f = { x: -Math.sin(player.yaw), z: -Math.cos(player.yaw) };
-    build.place({ type: 'floor', x: Math.round((player.x + f.x * 4) / 4) * 4, y: Math.floor(player.y / 4) * 4, z: Math.round((player.z + f.z * 4) / 4) * 4, rot: 0 });
-    hud.setMsg('Floor', 800);
+  buildPiece(type, tier) {
+    try {
+      build.setActive && build.setActive(true);
+      const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
+      const ix = Math.round((player.x + fx * 4) / 4);
+      const iz = Math.round((player.z + fz * 4) / 4);
+      const lv = Math.max(0, Math.round((player.y - 0.25) / 3));
+      const o = ((Math.round(player.yaw / (Math.PI / 2)) % 4) + 4) % 4;
+      const spec = { type, ix, iz, lv, o, tier: tier | 0 };
+      const piece = build.place(spec, { remote: true });
+      hud.setMsg(piece ? (`Spawned ${type}` + (tier ? ` T${tier}` : '')) : 'Could not place (blocked)', 1200);
+    } catch (err) {
+      console.error(err);
+      hud.setMsg('Build failed', 1500);
+    }
   },
   clearBuilds() { build.clear(); hud.setMsg('Builds cleared', 1200); },
   bot() {
-    ensureBotPool(Math.min(12, (enemies.length || 0) + 1));
+    ensureBotPool(Math.min(20, allEnemies.length || 8));
+    let spawned = false;
     for (const e of allEnemies) {
-      if (!e.mesh.visible) { e.mesh.visible = true; if (typeof respawnEnemy === 'function') respawnEnemy(e); break; }
+      if (!e.mesh.visible || !e.alive) {
+        e.mesh.visible = true; e.alive = true; e.hp = e.maxHp || 100;
+        if (typeof respawnEnemy === 'function') respawnEnemy(e);
+        spawned = true; break;
+      }
     }
-    hud.setMsg('Bot spawned', 1000);
+    hud.setMsg(spawned ? 'Bot spawned' : 'No free bot slots', 1000);
   },
   killBots() {
     for (const e of allEnemies) { e.mesh.visible = false; e.alive = false; }
     hud.setMsg('Bots cleared', 1000);
   },
-  lobby() { enterLobby('Left developer sandbox'); },
+  lobby() { hideBar(); setFly(false); enterLobby('Left developer sandbox'); },
   spawn(spec) {
     if (spec.startsWith('weapon:')) {
       const id = spec.slice(7);
       const def = ALL[id];
       if (!def) return;
-      const slot = def.slot || 'main';
-      if (typeof setSlot === 'function') setSlot(slot, id);
+      const slot = def.slot || (def.kind === 'melee' ? 'melee' : def.kind === 'utility' ? 'utility' : 'main');
+      setSlot(slot, id);
       if (ctrl.refreshLoadout) ctrl.refreshLoadout();
       if (ctrl.equip) ctrl.equip(slot);
-      hud.setMsg('Equipped ' + (def.name || id), 1200);
-    } else if (spec.startsWith('vehicle:')) {
-      hud.setMsg('Vehicles: use the ones on the map (E)', 1800);
+      hud.setMsg('Equipped ' + def.name, 1200);
+      return;
+    }
+    if (spec.startsWith('vehicle:')) {
+      const id = spec.slice(8);
+      if (vehicles && typeof vehicles.spawnAt === 'function') {
+        const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
+        vehicles.spawnAt({ type: id, x: player.x + fx * 6, y: player.y, z: player.z + fz * 6, yaw: player.yaw });
+        hud.setMsg('Spawned ' + id, 1200);
+      } else {
+        hud.setMsg('Vehicle spawn not available — use map vehicles (E)', 1800);
+      }
     }
   },
 });
-fillSpawnButtons(['jeep', 'truck', 'tank'], ['vanguard', 'stinger', 'breacher', 'p9', 'sledge', 'drone']);
 if (devUnlocked() && lobby.enableDevPortal) lobby.enableDevPortal();
 installErrorOverlay();
 mountDevSettingsSection();
 refreshDevUI();
+
+if (devUnlocked() && lobby.enableDevPortal) lobby.enableDevPortal();
 
 function startDrop() {
   if (!DROP_ENABLED || !dropship) return;
