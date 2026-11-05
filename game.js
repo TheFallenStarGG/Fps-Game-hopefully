@@ -7,6 +7,7 @@ import { createWorld } from './lib/scene.js';
 import { createRadar } from './lib/radar.js';
 import { createVehicles } from './lib/vehicles.js';
 import { createDrone } from './lib/drone.js';
+import { createLottery } from './lib/lottery.js';
 import { makeHumanoid, makeViewmodel } from './lib/humanoid.js';
 import { createBulletSystem } from './lib/weapons.js';
 import { createHud } from './lib/hud.js';
@@ -108,6 +109,7 @@ const hud = createHud();
 
 const vehicles = createVehicles({ scene, audio, hud });
 const drone = createDrone({ scene, hud, isTouch });
+const lottery = createLottery({ scene, hud, audio, camera });
 const match = createMatch();
 const bullets = createBulletSystem(scene, tex, {
   onLand: (kind, x, y, z) => audio.play(kind === 'mag' ? 'magDrop' : 'shell', x, z),
@@ -505,7 +507,7 @@ function onBuildTier() {
 }
 
 ctrl = createPlayerController({
-  scene, camera, playerMesh, viewmodel, player, input, bullets, hud, audio, build, world, net, drone,
+  scene, camera, playerMesh, viewmodel, player, input, bullets, hud, audio, build, world, net, drone, lottery,
   getEnemies: () => (where === 'bots' ? enemies : []),
   getRemotes: () => remotes,
   isMulti,
