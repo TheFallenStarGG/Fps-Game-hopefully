@@ -30,6 +30,8 @@
           "!.git{,/**/*}",
           "!.github{,/**/*}",
           "!**/node_modules{,/**/*}",
+          "!android{,/**/*}",
+          "!www{,/**/*}",
           "!**/*.md",
           "!.gitignore"
         ]
@@ -42,11 +44,11 @@
           "arch": ["x64"]
         }
       ],
-      "artifactName": "RiftHorizon-${version}-portable.exe",
+      "artifactName": "RiftHorizon-${version}-windows-portable.exe",
       "signAndEditExecutable": false
     },
     "portable": {
-      "artifactName": "RiftHorizon-${version}-portable.exe"
+      "artifactName": "RiftHorizon-${version}-windows-portable.exe"
     }
   },
   "devDependencies": {
