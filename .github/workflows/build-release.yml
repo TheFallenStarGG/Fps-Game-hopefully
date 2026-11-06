@@ -160,24 +160,69 @@ jobs:
           npx cap add android
           npx cap sync android
 
+
       - name: Apply favicon + polish
         run: |
-          set -e
-          test -f favicon.png
-          for d in mipmap-mdpi mipmap-hdpi mipmap-xhdpi mipmap-xxhdpi mipmap-xxxhdpi; do
-            mkdir -p "android/app/src/main/res/$d"
-            cp favicon.png "android/app/src/main/res/$d/ic_launcher.png"
-            cp favicon.png "android/app/src/main/res/$d/ic_launcher_round.png"
-            cp favicon.png "android/app/src/main/res/$d/ic_launcher_foreground.png"
-          done
-          mkdir -p android/app/src/main/res/mipmap-anydpi-v26 android/app/src/main/res/values
-          cat > android/app/src/main/res/values/ic_launcher_background.xml << 'XML'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources><color name="ic_launcher_background">#0A0C10</color></resources>
-          XML
+          set -euo pipefail
+          chmod +x scripts/polish-android.sh
           ./scripts/polish-android.sh
-          # versionName in build.gradle
-          sed -i "s/versionName \".*\"/versionName \"${{ env.APP_VERSION }}\"/" android/app/build.gradle || true
+
+          # Android AAPT is strict: raw favicon.png often fails ("file failed to compile").
+          # Convert to proper sRGB PNG32 at standard launcher sizes, or skip icons on failure.
+          python3 << 'ENDPY'
+          import subprocess, sys
+          from pathlib import Path
+
+          src = Path("favicon.png")
+          if not src.exists():
+              print("No favicon.png — keeping Capacitor default icons")
+              sys.exit(0)
+
+          try:
+              from PIL import Image
+          except ImportError:
+              subprocess.check_call([sys.executable, "-m", "pip", "install", "pillow", "-q"])
+              from PIL import Image
+
+          im = Image.open(src)
+          im = im.convert("RGBA")
+          # Flatten onto opaque dark background (adaptive/legacy launchers prefer this)
+          bg = Image.new("RGBA", im.size, (10, 12, 16, 255))
+          bg.alpha_composite(im)
+          im = bg.convert("RGBA")
+
+          sizes = {
+              "mipmap-mdpi": 48,
+              "mipmap-hdpi": 72,
+              "mipmap-xhdpi": 96,
+              "mipmap-xxhdpi": 144,
+              "mipmap-xxxhdpi": 192,
+          }
+          for folder, size in sizes.items():
+              d = Path("android/app/src/main/res") / folder
+              d.mkdir(parents=True, exist_ok=True)
+              # Remove adaptive XML that can conflict with PNG launchers
+              for junk in d.glob("*.xml"):
+                  junk.unlink()
+              icon = im.resize((size, size), Image.Resampling.LANCZOS)
+              for name in ("ic_launcher.png", "ic_launcher_round.png", "ic_launcher_foreground.png"):
+                  out = d / name
+                  icon.save(out, format="PNG", optimize=True)
+                  print("wrote", out, out.stat().st_size)
+
+          # Drop anydpi adaptive wrappers if present (use density PNGs only)
+          anydpi = Path("android/app/src/main/res/mipmap-anydpi-v26")
+          if anydpi.exists():
+              for f in anydpi.glob("ic_launcher*.xml"):
+                  f.unlink()
+                  print("removed", f)
+          print("Launcher icons converted OK")
+          ENDPY
+
+          # versionName
+          if [ -f android/app/build.gradle ]; then
+            sed -i "s/versionName \".*\"/versionName \"${{ env.APP_VERSION }}\"/" android/app/build.gradle || true
+          fi
 
       - name: Cache / create persistent signing keystore
         uses: actions/cache@v4
@@ -204,45 +249,70 @@ jobs:
           echo "STORE_PASS=$STORE_PASS" >> "$GITHUB_ENV"
           echo "KEY_PASS=$KEY_PASS" >> "$GITHUB_ENV"
 
+
       - name: Build signed release APK
         working-directory: android
-        run: |
-          set -e
-          chmod +x gradlew
-          # inject signing into app/build.gradle if not present
-          if ! grep -q 'storeFile' app/build.gradle; then
-            python3 - << 'PY'
-          from pathlib import Path
-          p = Path('app/build.gradle')
-          t = p.read_text()
-          signing = '''
-              signingConfigs {
-                  release {
-                      storeFile file("../../signing/release.jks")
-                      storePassword System.getenv("KEYSTORE_PASSWORD") ?: "rifthorizon-ci-store"
-                      keyAlias "rifthorizon"
-                      keyPassword System.getenv("KEY_PASSWORD") ?: "rifthorizon-ci-key"
-                  }
-              }
-          '''
-          if 'signingConfigs' not in t:
-              t = t.replace('android {', 'android {\n' + signing, 1)
-          if "signingConfig signingConfigs.release" not in t:
-              import re
-              t = re.sub(
-                  r'(buildTypes\s*\{\s*release\s*\{)',
-                  r'\1\n            signingConfig signingConfigs.release',
-                  t,
-                  count=1,
-              )
-          p.write_text(t)
-          print('Signing config injected')
-          PY
-          fi
-          ./gradlew assembleRelease --no-daemon --stacktrace
         env:
           KEYSTORE_PASSWORD: ${{ env.STORE_PASS }}
           KEY_PASSWORD: ${{ env.KEY_PASS }}
+          KEYSTORE_PATH: ${{ github.workspace }}/signing/release.jks
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          test -f "$KEYSTORE_PATH"
+          python3 << 'ENDPY'
+          import os, re
+          from pathlib import Path
+
+          p = Path("app/build.gradle")
+          if not p.exists():
+              # Capacitor 7 sometimes uses .kts — fail clearly
+              alts = list(Path("app").glob("build.gradle*"))
+              raise SystemExit(f"app/build.gradle not found; found={alts}")
+
+          t = p.read_text()
+          ks = os.environ["KEYSTORE_PATH"].replace("\\", "/")
+          store = os.environ.get("KEYSTORE_PASSWORD") or "rifthorizon-ci-store"
+          key = os.environ.get("KEY_PASSWORD") or "rifthorizon-ci-key"
+
+          # Remove prior signingConfigs blocks (best-effort)
+          t = re.sub(r"signingConfigs\s*\{(?:[^{}]|\{[^{}]*\})*\}", "", t)
+
+          signing_block = (
+              "    signingConfigs {\n"
+              "        release {\n"
+              f'            storeFile file("{ks}")\n'
+              f'            storePassword "{store}"\n'
+              '            keyAlias "rifthorizon"\n'
+              f'            keyPassword "{key}"\n'
+              "        }\n"
+              "    }\n"
+          )
+
+          if "android {" in t:
+              t = t.replace("android {", "android {\n" + signing_block, 1)
+          else:
+              raise SystemExit("no android { in build.gradle")
+
+          if "signingConfig signingConfigs.release" not in t:
+              t2, n = re.subn(
+                  r"(release\s*\{)",
+                  r"\1\n            signingConfig signingConfigs.release",
+                  t,
+                  count=1,
+              )
+              t = t2 if n else t
+
+          t = t.replace("minifyEnabled true", "minifyEnabled false")
+          p.write_text(t)
+          print("Patched", p)
+          for i, line in enumerate(p.read_text().splitlines(), 1):
+              low = line.lower()
+              if "signing" in low or "storefile" in low or "keyalias" in low:
+                  print(f"{i}:{line}")
+          ENDPY
+
+          ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Rename APK
         run: |
