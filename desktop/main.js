@@ -24,7 +24,6 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      // Three.js + import maps load from the game folder; CDN still needs network
       webSecurity: true,
     },
   });
@@ -32,13 +31,11 @@ function createWindow() {
   win.once('ready-to-show', () => win.show());
   win.loadFile(path.join(gameRoot, 'index.html'));
 
-  // Open external links in the OS browser, not inside the game window
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
   });
 
-  // Minimal menu: fullscreen + quit (Windows)
   const menu = Menu.buildFromTemplate([
     {
       label: 'Game',
