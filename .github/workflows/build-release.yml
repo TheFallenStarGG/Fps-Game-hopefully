@@ -1,0 +1,153 @@
+# Builds Windows EXE + Android APK and publishes both on one GitHub Release.
+name: Build & Release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - Update-4
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+env:
+  APP_VERSION: '0.4.0'
+
+jobs:
+  windows:
+    name: Windows EXE
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: desktop/package.json
+
+      - name: Install & build
+        working-directory: desktop
+        run: |
+          npm install
+          npm run dist
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: desktop/dist/*.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: package.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Capacitor deps
+        run: npm install
+
+      - name: Stage web assets into www/
+        run: |
+          rm -rf www
+          mkdir -p www
+          # Copy the playable site; skip native/tooling folders
+          for item in index.html game.js favicon.png apple-touch-icon.png og.png lib assets; do
+            if [ -e "$item" ]; then cp -a "$item" www/; fi
+          done
+          # Any other root static files the game might need
+          for f in *.js *.css *.json *.wasm; do
+            [ -f "$f" ] || continue
+            case "$f" in package.json|package-lock.json|capacitor.config.json) continue ;; esac
+            cp -a "$f" www/
+          done
+          ls -la www
+
+      - name: Add Android platform & sync
+        run: |
+          npx cap add android
+          npx cap sync android
+
+      - name: Build debug APK (sideload-friendly, no signing secrets)
+        working-directory: android
+        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+
+      - name: Rename APK
+        run: |
+          mkdir -p out
+          APK=$(find android/app/build/outputs/apk/debug -name '*.apk' | head -n 1)
+          cp "$APK" "out/RiftHorizon-${{ env.APP_VERSION }}-android-debug.apk"
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: out/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: GitHub Release
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Windows EXE
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-exe
+          path: release-assets
+
+      - name: Download Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: android-apk
+          path: release-assets
+
+      - name: List assets
+        run: ls -la release-assets
+
+      # Tag: v0.4.0-build.<run_number> so every push can release without clashing
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.APP_VERSION }}-build.${{ github.run_number }}
+          name: Rift Horizon v${{ env.APP_VERSION }} (build ${{ github.run_number }})
+          body: |
+            Automated build from branch `${{ github.ref_name }}` (`${{ github.sha }}`).
+
+            ### Downloads
+            - **Windows:** portable `.exe` (no installer) — needs internet once for Three.js CDN
+            - **Android:** debug `.apk` — enable “Install unknown apps” to sideload
+
+            Web version stays on your Pages host.
+          files: release-assets/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
