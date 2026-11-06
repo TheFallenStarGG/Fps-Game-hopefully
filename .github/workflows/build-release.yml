@@ -12,6 +12,12 @@ on:
       - '.gitignore'
   workflow_dispatch: {}
 
+# New push on the same branch cancels the in-progress run so rapid
+# multi-file edits only produce one final build/release.
+concurrency:
+  group: build-release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -63,7 +69,6 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # Manual SDK install — more reliable than setup-android on current runners
       - name: Install Android SDK command-line tools
         run: |
           set -e
@@ -71,7 +76,6 @@ jobs:
           mkdir -p "$ANDROID_ROOT/cmdline-tools"
           curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmdtools.zip
           unzip -q /tmp/cmdtools.zip -d "$ANDROID_ROOT/cmdline-tools"
-          # zip contains a top-level "cmdline-tools" folder → rename to "latest"
           rm -rf "$ANDROID_ROOT/cmdline-tools/latest"
           mv "$ANDROID_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_ROOT/cmdline-tools/latest"
           echo "ANDROID_HOME=$ANDROID_ROOT" >> "$GITHUB_ENV"
@@ -84,7 +88,6 @@ jobs:
           set -e
           yes | sdkmanager --licenses >/tmp/sdk-licenses.txt || true
           sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0"
-          sdkmanager --list_installed | head -40
 
       - name: Install Capacitor deps
         run: npm install
@@ -103,8 +106,6 @@ jobs:
             cp -a "$f" www/ 2>/dev/null || true
           done
           test -f www/index.html
-          echo "www contents:"
-          find www -maxdepth 2 -type f | head -50
 
       - name: Add Android platform & sync
         run: |
@@ -125,10 +126,8 @@ jobs:
           set -e
           mkdir -p out
           APK=$(find android/app/build/outputs/apk/debug -name '*.apk' | head -n 1)
-          echo "Found APK: $APK"
           test -n "$APK"
           cp "$APK" "out/RiftHorizon-${{ env.APP_VERSION }}-android-debug.apk"
-          ls -la out
 
       - uses: actions/upload-artifact@v4
         with:
@@ -158,24 +157,126 @@ jobs:
           name: android-apk
           path: release-assets
 
-      - name: List assets
-        run: ls -la release-assets
+      - name: Debounce — skip if a release was published in the last 10 minutes
+        id: debounce
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          # Manual "Run workflow" always publishes
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Manual run — release allowed"
+            exit 0
+          fi
+          # Latest release published_at (empty if none)
+          PUBLISHED=$(gh api "repos/${{ github.repository }}/releases?per_page=1" --jq '.[0].published_at // empty' 2>/dev/null || true)
+          if [ -z "$PUBLISHED" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "No prior release — publishing"
+            exit 0
+          fi
+          NOW=$(date -u +%s)
+          THEN=$(date -u -d "$PUBLISHED" +%s)
+          AGE=$(( NOW - THEN ))
+          echo "Last release was ${AGE}s ago ($PUBLISHED)"
+          if [ "$AGE" -lt 600 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Skipping release (within 10 minute debounce window)"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build release notes from real changes
+        if: steps.debounce.outputs.skip != 'true'
+        id: notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TAG="v${{ env.APP_VERSION }}-build.${{ github.run_number }}"
+          PREV=$(gh api "repos/${{ github.repository }}/releases?per_page=1" --jq '.[0].tag_name // empty' 2>/dev/null || true)
+
+          # GitHub's own changelog (same engine as the "Generate release notes" button)
+          if [ -n "$PREV" ]; then
+            NOTES=$(gh api \
+              --method POST \
+              "repos/${{ github.repository }}/releases/generate-notes" \
+              -f tag_name="$TAG" \
+              -f target_commitish="${{ github.sha }}" \
+              -f previous_tag_name="$PREV" \
+              --jq '.body' 2>/dev/null || true)
+          else
+            NOTES=$(gh api \
+              --method POST \
+              "repos/${{ github.repository }}/releases/generate-notes" \
+              -f tag_name="$TAG" \
+              -f target_commitish="${{ github.sha }}" \
+              --jq '.body' 2>/dev/null || true)
+          fi
+
+          # Extra: file-level diff since previous tag (or last 15 commits)
+          echo "## What changed" > /tmp/body.md
+          echo "" >> /tmp/body.md
+          if [ -n "$PREV" ] && git rev-parse "$PREV" >/dev/null 2>&1; then
+            echo "Compared to \`$PREV\`:" >> /tmp/body.md
+            echo "" >> /tmp/body.md
+            echo '```' >> /tmp/body.md
+            git log --oneline "${PREV}..HEAD" | head -40 >> /tmp/body.md || true
+            echo '```' >> /tmp/body.md
+            echo "" >> /tmp/body.md
+            echo "### Files touched" >> /tmp/body.md
+            echo "" >> /tmp/body.md
+            echo '```' >> /tmp/body.md
+            git diff --name-status "${PREV}..HEAD" | head -80 >> /tmp/body.md || true
+            echo '```' >> /tmp/body.md
+          else
+            echo "Recent commits:" >> /tmp/body.md
+            echo "" >> /tmp/body.md
+            echo '```' >> /tmp/body.md
+            git log --oneline -20 | head -20 >> /tmp/body.md
+            echo '```' >> /tmp/body.md
+          fi
+
+          echo "" >> /tmp/body.md
+          if [ -n "$NOTES" ]; then
+            echo "$NOTES" >> /tmp/body.md
+            echo "" >> /tmp/body.md
+          fi
+
+          cat >> /tmp/body.md << END
+
+          ---
+
+          **Branch:** \`${{ github.ref_name }}\` · **Commit:** \`${{ github.sha }}\`
+
+          ### Downloads
+          - **Windows:** portable \`.exe\` (no installer) — needs internet once for Three.js CDN
+          - **Android:** debug \`.apk\` — enable “Install unknown apps” to sideload
+
+          Web version stays on your Pages host.
+          END
+
+          # Expose path for the release action
+          echo "path=/tmp/body.md" >> "$GITHUB_OUTPUT"
+          echo "----- release body preview -----"
+          head -60 /tmp/body.md
 
       - name: Create release
+        if: steps.debounce.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.APP_VERSION }}-build.${{ github.run_number }}
           name: Rift Horizon v${{ env.APP_VERSION }} (build ${{ github.run_number }})
-          body: |
-            Automated build from branch `${{ github.ref_name }}` (`${{ github.sha }}`).
-
-            ### Downloads
-            - **Windows:** portable `.exe` (no installer) — needs internet once for Three.js CDN
-            - **Android:** debug `.apk` — enable “Install unknown apps” to sideload
-
-            Web version stays on your Pages host.
+          body_path: ${{ steps.notes.outputs.path }}
           files: release-assets/*
           fail_on_unmatched_files: true
-          generate_release_notes: true
+          generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Debounce notice
+        if: steps.debounce.outputs.skip == 'true'
+        run: |
+          echo "Build artifacts were produced, but release was skipped (another release within 10 minutes)."
+          echo "Push again after 10 minutes, or use Actions → Run workflow to force a release."
