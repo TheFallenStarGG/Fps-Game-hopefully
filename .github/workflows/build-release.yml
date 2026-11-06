@@ -1,19 +1,12 @@
-# Builds Windows EXE + Android APK and publishes both on one GitHub Release.
+# Builds Windows EXE + Android APK, vendors Three.js offline, auto-versions, releases.
 name: Build & Release
 
 on:
   push:
-    branches:
-      - main
-      - master
-      - Update-4
-    paths-ignore:
-      - '**.md'
-      - '.gitignore'
+    branches: [main, master, Update-4]
+    paths-ignore: ['**.md', '.gitignore']
   workflow_dispatch: {}
 
-# New push on the same branch cancels the in-progress run so rapid
-# multi-file edits only produce one final build/release.
 concurrency:
   group: build-release-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -22,7 +15,9 @@ permissions:
   contents: write
 
 env:
-  APP_VERSION: '0.4.0'
+  # Auto version: 0.4.<run_number>
+  APP_VERSION: 0.4.${{ github.run_number }}
+  THREE_VERSION: '0.170.0'
 
 jobs:
   windows:
@@ -37,8 +32,31 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package.json
 
+      - name: Vendor Three.js (offline)
+        shell: bash
+        run: |
+          chmod +x scripts/vendor-three.sh scripts/use-local-three.sh
+          ./scripts/vendor-three.sh
+          ./scripts/use-local-three.sh index.html
+
+      - name: Stage game for Electron
+        shell: bash
+        run: |
+          set -e
+          rm -rf _game_stage
+          mkdir -p _game_stage
+          for item in index.html game.js favicon.png apple-touch-icon.png og.png lib assets vendor; do
+            [ -e "$item" ] && cp -a "$item" _game_stage/
+          done
+          echo "${{ env.APP_VERSION }}" > _game_stage/version.txt
+          # stamp desktop package version
+          node -e "const p=require('./desktop/package.json');p.version=process.env.APP_VERSION;require('fs').writeFileSync('./desktop/package.json',JSON.stringify(p,null,2))"
+        env:
+          APP_VERSION: ${{ env.APP_VERSION }}
+
       - name: Install & build
         working-directory: desktop
+        shell: bash
         run: |
           npm install
           npm run dist
@@ -68,16 +86,37 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
+
+      - name: Cache Android SDK
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/android-sdk
+            ~/.android/cache
+          key: android-sdk-34-${{ runner.os }}-v2
+          restore-keys: android-sdk-34-${{ runner.os }}-
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
 
       - name: Install Android SDK command-line tools
         run: |
           set -e
           ANDROID_ROOT="$HOME/android-sdk"
-          mkdir -p "$ANDROID_ROOT/cmdline-tools"
-          curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmdtools.zip
-          unzip -q /tmp/cmdtools.zip -d "$ANDROID_ROOT/cmdline-tools"
-          rm -rf "$ANDROID_ROOT/cmdline-tools/latest"
-          mv "$ANDROID_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_ROOT/cmdline-tools/latest"
+          if [ ! -x "$ANDROID_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+            mkdir -p "$ANDROID_ROOT/cmdline-tools"
+            curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmdtools.zip
+            unzip -q /tmp/cmdtools.zip -d "$ANDROID_ROOT/cmdline-tools"
+            rm -rf "$ANDROID_ROOT/cmdline-tools/latest"
+            mv "$ANDROID_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_ROOT/cmdline-tools/latest"
+          fi
           echo "ANDROID_HOME=$ANDROID_ROOT" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$ANDROID_ROOT" >> "$GITHUB_ENV"
           echo "$ANDROID_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
@@ -92,81 +131,126 @@ jobs:
       - name: Install Capacitor deps
         run: npm install
 
+      - name: Vendor Three.js (offline)
+        run: |
+          chmod +x scripts/vendor-three.sh scripts/use-local-three.sh scripts/polish-android.sh
+          ./scripts/vendor-three.sh
+
       - name: Stage web assets into www/
         run: |
           set -e
           rm -rf www
           mkdir -p www
-          for item in index.html game.js favicon.png apple-touch-icon.png og.png lib assets; do
-            if [ -e "$item" ]; then cp -a "$item" www/; fi
+          for item in index.html game.js favicon.png apple-touch-icon.png og.png lib assets vendor; do
+            [ -e "$item" ] && cp -a "$item" www/
           done
-          for f in *.js *.css *.wasm; do
-            [ -f "$f" ] || continue
-            case "$f" in package.json|package-lock.json) continue ;; esac
-            cp -a "$f" www/ 2>/dev/null || true
-          done
+          ./scripts/use-local-three.sh www/index.html
+          echo "${{ env.APP_VERSION }}" > www/version.txt
+          # inject native back hook
+          if [ -f scripts/native-bridge-snippet.js ]; then
+            cat scripts/native-bridge-snippet.js >> www/game.js
+          fi
           test -f www/index.html
+          test -f www/vendor/three/build/three.module.js
 
       - name: Add Android platform & sync
         run: |
           set -e
           npx cap add android
           npx cap sync android
-          test -d android
 
-      - name: Apply favicon.png as Android app icon
+      - name: Apply favicon + polish
         run: |
           set -e
           test -f favicon.png
-          # Capacitor default launcher names
-          for d in mipmap-mdpi mipmap-hdpi mipmap-xhdpi mipmap-xxhdpi mipmap-xxxhdpi mipmap-anydpi-v26; do
-            mkdir -p "android/app/src/main/res/$d"
-          done
           for d in mipmap-mdpi mipmap-hdpi mipmap-xhdpi mipmap-xxhdpi mipmap-xxxhdpi; do
+            mkdir -p "android/app/src/main/res/$d"
             cp favicon.png "android/app/src/main/res/$d/ic_launcher.png"
             cp favicon.png "android/app/src/main/res/$d/ic_launcher_round.png"
             cp favicon.png "android/app/src/main/res/$d/ic_launcher_foreground.png"
           done
-          # Adaptive icon XML (API 26+) pointing at foreground
-          cat > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml << 'XML'
+          mkdir -p android/app/src/main/res/mipmap-anydpi-v26 android/app/src/main/res/values
+          cat > android/app/src/main/res/values/ic_launcher_background.xml << 'XML'
           <?xml version="1.0" encoding="utf-8"?>
-          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-              <background android:drawable="@color/ic_launcher_background"/>
-              <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
-          </adaptive-icon>
+          <resources><color name="ic_launcher_background">#0A0C10</color></resources>
           XML
-          cat > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml << 'XML'
-          <?xml version="1.0" encoding="utf-8"?>
-          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-              <background android:drawable="@color/ic_launcher_background"/>
-              <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
-          </adaptive-icon>
-          XML
-          mkdir -p android/app/src/main/res/values
-          if [ ! -f android/app/src/main/res/values/ic_launcher_background.xml ]; then
-            cat > android/app/src/main/res/values/ic_launcher_background.xml << 'XML'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <color name="ic_launcher_background">#0A0C10</color>
-          </resources>
-          XML
-          fi
-          echo "Android icons applied from favicon.png"
+          ./scripts/polish-android.sh
+          # versionName in build.gradle
+          sed -i "s/versionName \".*\"/versionName \"${{ env.APP_VERSION }}\"/" android/app/build.gradle || true
 
-      - name: Build debug APK
+      - name: Cache / create persistent signing keystore
+        uses: actions/cache@v4
+        id: keystore
+        with:
+          path: signing/release.jks
+          key: rifthorizon-android-keystore-v1
+
+      - name: Ensure keystore exists
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -e
+          mkdir -p signing
+          STORE_PASS="${KEYSTORE_PASSWORD:-rifthorizon-ci-store}"
+          KEY_PASS="${KEY_PASSWORD:-rifthorizon-ci-key}"
+          if [ ! -f signing/release.jks ]; then
+            keytool -genkeypair -v -storetype JKS -keyalg RSA -keysize 2048 -validity 10000               -alias rifthorizon               -keystore signing/release.jks               -storepass "$STORE_PASS"               -keypass "$KEY_PASS"               -dname "CN=Rift Horizon, OU=Game, O=TheFallenStarGG, C=US"
+            echo "Generated new release keystore (cached for future runs)"
+          else
+            echo "Reusing cached release keystore"
+          fi
+          echo "STORE_PASS=$STORE_PASS" >> "$GITHUB_ENV"
+          echo "KEY_PASS=$KEY_PASS" >> "$GITHUB_ENV"
+
+      - name: Build signed release APK
         working-directory: android
         run: |
           set -e
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          # inject signing into app/build.gradle if not present
+          if ! grep -q 'storeFile' app/build.gradle; then
+            python3 - << 'PY'
+          from pathlib import Path
+          p = Path('app/build.gradle')
+          t = p.read_text()
+          signing = '''
+              signingConfigs {
+                  release {
+                      storeFile file("../../signing/release.jks")
+                      storePassword System.getenv("KEYSTORE_PASSWORD") ?: "rifthorizon-ci-store"
+                      keyAlias "rifthorizon"
+                      keyPassword System.getenv("KEY_PASSWORD") ?: "rifthorizon-ci-key"
+                  }
+              }
+          '''
+          if 'signingConfigs' not in t:
+              t = t.replace('android {', 'android {\n' + signing, 1)
+          if "signingConfig signingConfigs.release" not in t:
+              import re
+              t = re.sub(
+                  r'(buildTypes\s*\{\s*release\s*\{)',
+                  r'\1\n            signingConfig signingConfigs.release',
+                  t,
+                  count=1,
+              )
+          p.write_text(t)
+          print('Signing config injected')
+          PY
+          fi
+          ./gradlew assembleRelease --no-daemon --stacktrace
+        env:
+          KEYSTORE_PASSWORD: ${{ env.STORE_PASS }}
+          KEY_PASSWORD: ${{ env.KEY_PASS }}
 
       - name: Rename APK
         run: |
           set -e
           mkdir -p out
-          APK=$(find android/app/build/outputs/apk/debug -name '*.apk' | head -n 1)
+          APK=$(find android/app/build/outputs/apk/release -name '*.apk' | head -n 1)
           test -n "$APK"
-          cp "$APK" "out/RiftHorizon-${{ env.APP_VERSION }}-android-debug.apk"
+          cp "$APK" "out/RiftHorizon-${{ env.APP_VERSION }}-android.apk"
+          ls -la out
 
       - uses: actions/upload-artifact@v4
         with:
@@ -202,26 +286,21 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
-          # Manual "Run workflow" always publishes
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "Manual run — release allowed"
             exit 0
           fi
-          # Latest release published_at (empty if none)
           PUBLISHED=$(gh api "repos/${{ github.repository }}/releases?per_page=1" --jq '.[0].published_at // empty' 2>/dev/null || true)
           if [ -z "$PUBLISHED" ]; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "No prior release — publishing"
             exit 0
           fi
           NOW=$(date -u +%s)
           THEN=$(date -u -d "$PUBLISHED" +%s)
           AGE=$(( NOW - THEN ))
-          echo "Last release was ${AGE}s ago ($PUBLISHED)"
+          echo "Last release ${AGE}s ago"
           if [ "$AGE" -lt 600 ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Skipping release (within 10 minute debounce window)"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
@@ -233,40 +312,26 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
-          TAG="v${{ env.APP_VERSION }}-build.${{ github.run_number }}"
           PREV=$(gh api "repos/${{ github.repository }}/releases?per_page=1" --jq '.[0].tag_name // empty' 2>/dev/null || true)
-
           {
             echo "### Changelog"
             echo ""
             if [ -n "$PREV" ] && git rev-parse "$PREV" >/dev/null 2>&1; then
-              # Only commits after the last release, max 12 lines
               COUNT=$(git rev-list --count "${PREV}..HEAD" 2>/dev/null || echo 0)
               echo "Since \`$PREV\` (${COUNT} commits):"
               echo ""
-              git log --oneline --no-merges "${PREV}..HEAD" | head -12 | while read -r line; do
-                echo "- $line"
-              done
-              EXTRA=$(( COUNT > 12 ? COUNT - 12 : 0 ))
-              if [ "$EXTRA" -gt 0 ]; then
-                echo "- …and ${EXTRA} more"
-              fi
+              git log --oneline --no-merges "${PREV}..HEAD" | head -12 | while read -r line; do echo "- $line"; done
             else
-              echo "Recent commits:"
-              echo ""
-              git log --oneline --no-merges -8 | while read -r line; do
-                echo "- $line"
-              done
+              git log --oneline --no-merges -8 | while read -r line; do echo "- $line"; done
             fi
             echo ""
             echo "---"
             echo ""
-            echo "**${{ github.ref_name }}** · \`${{ github.sha }}\`"
+            echo "**v${{ env.APP_VERSION }}** · \`${{ github.ref_name }}\` · \`${{ github.sha }}\`"
             echo ""
-            echo "- **Windows:** portable \`.exe\`"
-            echo "- **Android:** debug \`.apk\` (sideload)"
+            echo "- **Windows:** portable + setup \`.exe\` (Three.js offline)"
+            echo "- **Android:** signed release \`.apk\` landscape (Three.js offline)"
           } > /tmp/body.md
-
           echo "path=/tmp/body.md" >> "$GITHUB_OUTPUT"
           cat /tmp/body.md
 
@@ -274,8 +339,8 @@ jobs:
         if: steps.debounce.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ env.APP_VERSION }}-build.${{ github.run_number }}
-          name: Rift Horizon v${{ env.APP_VERSION }} (build ${{ github.run_number }})
+          tag_name: v${{ env.APP_VERSION }}
+          name: Rift Horizon v${{ env.APP_VERSION }}
           body_path: ${{ steps.notes.outputs.path }}
           files: release-assets/*
           fail_on_unmatched_files: true
@@ -285,6 +350,4 @@ jobs:
 
       - name: Debounce notice
         if: steps.debounce.outputs.skip == 'true'
-        run: |
-          echo "Build artifacts were produced, but release was skipped (another release within 10 minutes)."
-          echo "Push again after 10 minutes, or use Actions → Run workflow to force a release."
+        run: echo "Release skipped (debounce). Artifacts still available on this Actions run."
