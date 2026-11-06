@@ -12,7 +12,7 @@
   "build": {
     "appId": "gg.thefallenstar.rifthorizon",
     "productName": "Rift Horizon",
-    "copyright": "Copyright © TheFallenStarGG",
+    "copyright": "Copyright \u00a9 TheFallenStarGG",
     "directories": {
       "output": "dist"
     },
@@ -41,14 +41,21 @@
       "target": [
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "artifactName": "RiftHorizon-${version}-windows-portable.exe",
-      "signAndEditExecutable": false
+      "signAndEditExecutable": false,
+      "icon": "../favicon.png"
     },
     "portable": {
       "artifactName": "RiftHorizon-${version}-windows-portable.exe"
+    },
+    "icon": "../favicon.png",
+    "mac": {
+      "icon": "../favicon.png"
     }
   },
   "devDependencies": {
