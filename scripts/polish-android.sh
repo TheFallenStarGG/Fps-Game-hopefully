@@ -5,6 +5,46 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 AND="$ROOT/android"
 test -d "$AND"
 
+# The build workflow later adds the signing config. Put its reference in the
+# release build type (not in signingConfigs.release) before that step runs.
+python3 - <<'PY'
+from pathlib import Path
+import re
+
+build_file = Path("android/app/build.gradle")
+if build_file.exists():
+    text = build_file.read_text()
+
+    def block_end(source, opening_brace):
+        depth = 0
+        for index in range(opening_brace, len(source)):
+            if source[index] == "{":
+                depth += 1
+            elif source[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    return index
+        raise SystemExit(f"Unmatched '{{' in {build_file}")
+
+    build_types = re.search(r"\bbuildTypes\s*\{", text)
+    if build_types:
+        build_types_open = text.index("{", build_types.start())
+        build_types_close = block_end(text, build_types_open)
+        release = re.search(r"\brelease\s*\{", text[build_types_open + 1:build_types_close])
+        if release:
+            release_open = build_types_open + 1 + release.end() - 1
+            release_close = block_end(text, release_open)
+            release_body = text[release_open + 1:release_close]
+            if not re.search(r"\bsigningConfig\s+signingConfigs\.release\b", release_body):
+                text = text[:release_open + 1] + "\n            signingConfig signingConfigs.release" + text[release_open + 1:]
+                build_file.write_text(text)
+                print(f"Added release signingConfig to {build_file}")
+        else:
+            raise SystemExit(f"No release build type found in {build_file}")
+    else:
+        raise SystemExit(f"No buildTypes block found in {build_file}")
+PY
+
 # build-release.yml uses Pillow to normalize the launcher icons. Install the
 # distro package so the runner's system Python can import PIL without relying
 # on pip's behavior for externally-managed Python environments.
