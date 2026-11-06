@@ -160,100 +160,88 @@ body[data-mode="lobby"] #hint { bottom:calc(60px + var(--sb)); }
 
 /* ---------- boot / loading screen ---------- */
 #boot {
-  position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
-  overflow: hidden; background: #0a0c10;
-  transition: opacity .55s ease, visibility .55s ease;
+  position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column;
+  align-items: center; justify-content: flex-end;
+  overflow: hidden; background: #07090c;
+  transition: opacity .6s ease, visibility .6s ease;
 }
 #boot.done { opacity: 0; visibility: hidden; pointer-events: none; }
+/* Full art, never cropped — letterbox on tall screens */
 #bootBg {
-  position: absolute; inset: -4%; background:
-    linear-gradient(180deg, rgba(6,8,12,.55) 0%, rgba(6,8,12,.72) 45%, rgba(6,8,12,.92) 100%),
-    url('og.png') center / cover no-repeat;
-  filter: saturate(1.05) contrast(1.05);
-  transform: scale(1.04);
-  animation: bootKen 22s ease-in-out infinite alternate;
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: #07090c;
 }
-@keyframes bootKen {
-  from { transform: scale(1.04) translate(0,0); }
-  to { transform: scale(1.1) translate(-1.5%, 1%); }
+#bootBg img {
+  width: 100%; height: 100%;
+  object-fit: contain;
+  object-position: center center;
+  display: block;
+  filter: saturate(1.06) contrast(1.04);
+  animation: bootSoft 18s ease-in-out infinite alternate;
+}
+@keyframes bootSoft {
+  from { transform: scale(1); }
+  to { transform: scale(1.03); }
 }
 #bootVignette {
   position: absolute; inset: 0; pointer-events: none;
-  background: radial-gradient(ellipse at center, transparent 30%, rgba(0,0,0,.65) 100%);
+  background:
+    linear-gradient(180deg, rgba(7,9,12,.15) 0%, transparent 28%, transparent 55%, rgba(7,9,12,.75) 100%),
+    radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,.35) 100%);
 }
 #bootScan {
-  position: absolute; inset: 0; pointer-events: none; opacity: .12;
-  background: repeating-linear-gradient(
-    0deg, transparent, transparent 2px, rgba(0,0,0,.35) 3px
-  );
-  mix-blend-mode: multiply;
-}
-#bootGrain {
-  position: absolute; inset: 0; pointer-events: none; opacity: .07;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-size: 180px 180px;
-  animation: bootGrain 0.4s steps(3) infinite;
-}
-@keyframes bootGrain { to { transform: translate(2%, -1%); } }
-#bootGlow {
-  position: absolute; width: 60vmax; height: 60vmax; left: 50%; top: 40%;
-  transform: translate(-50%, -50%); pointer-events: none;
-  background: radial-gradient(circle, rgba(255,194,71,.18) 0%, transparent 60%);
-  animation: bootPulse 3.5s ease-in-out infinite;
-}
-@keyframes bootPulse {
-  0%, 100% { opacity: .55; transform: translate(-50%, -50%) scale(1); }
-  50% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
+  position: absolute; inset: 0; pointer-events: none; opacity: .06;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,.4) 3px);
 }
 #bootParticles { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 #bootParticles span {
-  position: absolute; width: 3px; height: 3px; border-radius: 50%;
-  background: rgba(255,194,71,.75); box-shadow: 0 0 8px rgba(255,194,71,.6);
-  animation: bootFloat linear infinite;
-  opacity: 0;
+  position: absolute; width: 2px; height: 2px; border-radius: 50%;
+  background: rgba(255,194,71,.7); box-shadow: 0 0 6px rgba(255,194,71,.5);
+  animation: bootFloat linear infinite; opacity: 0;
 }
 @keyframes bootFloat {
-  0% { transform: translateY(20vh) scale(0.6); opacity: 0; }
-  15% { opacity: .85; }
-  100% { transform: translateY(-110vh) scale(1.1); opacity: 0; }
+  0% { transform: translateY(15vh); opacity: 0; }
+  20% { opacity: .7; }
+  100% { transform: translateY(-100vh); opacity: 0; }
 }
+/* Progress dock — bottom, doesn't cover title in art */
 #bootPanel {
-  position: relative; z-index: 2; width: min(420px, calc(100vw - 40px));
-  text-align: center; padding: 8px 6px;
-}
-#bootBrand {
-  font: 900 clamp(22px, 5vw, 32px) / 1 var(--mono);
-  letter-spacing: .28em; color: var(--acc);
-  text-shadow: 0 0 24px rgba(255,194,71,.35), 0 2px 12px rgba(0,0,0,.6);
-  margin-bottom: 6px;
-}
-#bootTag {
-  font-size: 12px; letter-spacing: .18em; text-transform: uppercase;
-  opacity: .55; margin-bottom: 28px;
+  position: relative; z-index: 2; width: min(440px, calc(100vw - 32px));
+  margin-bottom: max(28px, calc(16px + env(safe-area-inset-bottom)));
+  padding: 16px 18px 14px;
+  text-align: center;
+  background: rgba(10,12,16,.55);
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 14px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 12px 40px rgba(0,0,0,.45);
 }
 #bootBarWrap {
-  height: 6px; border-radius: 99px; background: rgba(255,255,255,.08);
-  border: 1px solid rgba(255,255,255,.12); overflow: hidden;
-  box-shadow: inset 0 1px 2px rgba(0,0,0,.4);
+  height: 5px; border-radius: 99px; background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.1); overflow: hidden;
 }
 #bootBar {
   height: 100%; width: 0%; border-radius: 99px;
-  background: linear-gradient(90deg, #c9891e, #ffc247 45%, #ffe6a0);
-  box-shadow: 0 0 16px rgba(255,194,71,.55);
-  transition: width .28s ease-out;
+  background: linear-gradient(90deg, #b87a18, #ffc247 50%, #ffe6a0);
+  box-shadow: 0 0 14px rgba(255,194,71,.5);
+  transition: width .3s ease-out;
 }
-#bootPct {
-  margin-top: 10px; font: 700 13px var(--mono); color: var(--acc);
-  letter-spacing: .08em;
+#bootMeta {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-top: 10px;
 }
 #bootStatus {
-  margin-top: 8px; min-height: 1.3em;
-  font: 500 12px/1.4 system-ui, sans-serif;
-  color: rgba(238,242,247,.72);
-  letter-spacing: .02em;
+  flex: 1; text-align: left; min-height: 1.2em;
+  font: 500 12px/1.35 system-ui, sans-serif;
+  color: rgba(238,242,247,.78);
+}
+#bootPct {
+  font: 700 12px var(--mono); color: var(--acc);
+  letter-spacing: .06em; flex-shrink: 0;
 }
 #bootHint {
-  margin-top: 18px; font-size: 11px; opacity: .4; letter-spacing: .06em;
+  margin-top: 8px; font-size: 10px; opacity: .38; letter-spacing: .04em;
 }
 
 /* hide menu card until boot finishes */
@@ -411,18 +399,16 @@ body.in-vehicle #hpWrap { opacity:.35; }
 
 
 <div id="boot" aria-live="polite">
-  <div id="bootBg"></div>
+  <div id="bootBg"><img src="og.png" alt="" decoding="async" fetchpriority="high" /></div>
   <div id="bootVignette"></div>
   <div id="bootScan"></div>
-  <div id="bootGrain"></div>
-  <div id="bootGlow"></div>
   <div id="bootParticles"></div>
   <div id="bootPanel">
-    <div id="bootBrand">RIFT HORIZON</div>
-    <div id="bootTag">Deploy · Dominate · Survive</div>
     <div id="bootBarWrap"><div id="bootBar"></div></div>
-    <div id="bootPct">0%</div>
-    <div id="bootStatus">Starting engine…</div>
+    <div id="bootMeta">
+      <div id="bootStatus">Starting engine…</div>
+      <div id="bootPct">0%</div>
+    </div>
     <div id="bootHint">First load may take a moment on mobile</div>
   </div>
 </div>
