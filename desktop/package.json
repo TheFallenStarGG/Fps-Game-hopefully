@@ -7,12 +7,12 @@
   "license": "UNLICENSED",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win portable"
+    "dist": "electron-builder --win"
   },
   "build": {
     "appId": "gg.thefallenstar.rifthorizon",
     "productName": "Rift Horizon",
-    "copyright": "Copyright \u00a9 TheFallenStarGG",
+    "copyright": "Copyright TheFallenStarGG",
     "directories": {
       "output": "dist"
     },
@@ -22,40 +22,35 @@
     ],
     "extraResources": [
       {
-        "from": "..",
-        "to": "game",
-        "filter": [
-          "**/*",
-          "!desktop{,/**/*}",
-          "!.git{,/**/*}",
-          "!.github{,/**/*}",
-          "!**/node_modules{,/**/*}",
-          "!android{,/**/*}",
-          "!www{,/**/*}",
-          "!**/*.md",
-          "!.gitignore"
-        ]
+        "from": "../_game_stage",
+        "to": "game"
       }
     ],
+    "icon": "../favicon.png",
     "win": {
+      "icon": "../favicon.png",
+      "signAndEditExecutable": false,
       "target": [
         {
           "target": "portable",
-          "arch": [
-            "x64"
-          ]
+          "arch": ["x64"]
+        },
+        {
+          "target": "nsis",
+          "arch": ["x64"]
         }
-      ],
-      "artifactName": "RiftHorizon-${version}-windows-portable.exe",
-      "signAndEditExecutable": false,
-      "icon": "../favicon.png"
+      ]
     },
     "portable": {
       "artifactName": "RiftHorizon-${version}-windows-portable.exe"
     },
-    "icon": "../favicon.png",
-    "mac": {
-      "icon": "../favicon.png"
+    "nsis": {
+      "artifactName": "RiftHorizon-${version}-windows-setup.exe",
+      "oneClick": true,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Rift Horizon"
     }
   },
   "devDependencies": {
