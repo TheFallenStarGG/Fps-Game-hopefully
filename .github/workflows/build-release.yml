@@ -27,7 +27,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
           cache-dependency-path: desktop/package.json
 
@@ -54,50 +54,79 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
           cache-dependency-path: package.json
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      # Manual SDK install — more reliable than setup-android on current runners
+      - name: Install Android SDK command-line tools
+        run: |
+          set -e
+          ANDROID_ROOT="$HOME/android-sdk"
+          mkdir -p "$ANDROID_ROOT/cmdline-tools"
+          curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmdtools.zip
+          unzip -q /tmp/cmdtools.zip -d "$ANDROID_ROOT/cmdline-tools"
+          # zip contains a top-level "cmdline-tools" folder → rename to "latest"
+          rm -rf "$ANDROID_ROOT/cmdline-tools/latest"
+          mv "$ANDROID_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_ROOT/cmdline-tools/latest"
+          echo "ANDROID_HOME=$ANDROID_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_ROOT" >> "$GITHUB_ENV"
+          echo "$ANDROID_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_ROOT/platform-tools" >> "$GITHUB_PATH"
+
+      - name: Install platform packages
+        run: |
+          set -e
+          yes | sdkmanager --licenses >/tmp/sdk-licenses.txt || true
+          sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+          sdkmanager --list_installed | head -40
 
       - name: Install Capacitor deps
         run: npm install
 
       - name: Stage web assets into www/
         run: |
+          set -e
           rm -rf www
           mkdir -p www
-          # Copy the playable site; skip native/tooling folders
           for item in index.html game.js favicon.png apple-touch-icon.png og.png lib assets; do
             if [ -e "$item" ]; then cp -a "$item" www/; fi
           done
-          # Any other root static files the game might need
-          for f in *.js *.css *.json *.wasm; do
+          for f in *.js *.css *.wasm; do
             [ -f "$f" ] || continue
-            case "$f" in package.json|package-lock.json|capacitor.config.json) continue ;; esac
-            cp -a "$f" www/
+            case "$f" in package.json|package-lock.json) continue ;; esac
+            cp -a "$f" www/ 2>/dev/null || true
           done
-          ls -la www
+          test -f www/index.html
+          echo "www contents:"
+          find www -maxdepth 2 -type f | head -50
 
       - name: Add Android platform & sync
         run: |
+          set -e
           npx cap add android
           npx cap sync android
+          test -d android
 
-      - name: Build debug APK (sideload-friendly, no signing secrets)
+      - name: Build debug APK
         working-directory: android
-        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+        run: |
+          set -e
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Rename APK
         run: |
+          set -e
           mkdir -p out
           APK=$(find android/app/build/outputs/apk/debug -name '*.apk' | head -n 1)
+          echo "Found APK: $APK"
+          test -n "$APK"
           cp "$APK" "out/RiftHorizon-${{ env.APP_VERSION }}-android-debug.apk"
           ls -la out
 
@@ -132,7 +161,6 @@ jobs:
       - name: List assets
         run: ls -la release-assets
 
-      # Tag: v0.4.0-build.<run_number> so every push can release without clashing
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
