@@ -1,0 +1,11 @@
+{
+  "appId": "gg.thefallenstar.rifthorizon",
+  "appName": "Rift Horizon",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": true
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}
