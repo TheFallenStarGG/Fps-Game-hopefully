@@ -86,7 +86,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
 
       - name: Cache Android SDK
         uses: actions/cache@v4
@@ -103,8 +102,10 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: gradle-${{ runner.os }}-
+          key: gradle-${{ runner.os }}-capacitor6-v1
+          restore-keys: |
+            gradle-${{ runner.os }}-capacitor6-
+            gradle-${{ runner.os }}-
 
       - name: Install Android SDK command-line tools
         run: |
