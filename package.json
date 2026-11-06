@@ -2,7 +2,7 @@
   "name": "rift-horizon",
   "version": "0.4.0",
   "private": true,
-  "description": "Rift Horizon — web game",
+  "description": "Rift Horizon",
   "dependencies": {
     "@capacitor/android": "^6.2.0",
     "@capacitor/core": "^6.2.0"
