@@ -35,8 +35,17 @@ import {
   fillSpawnButtons, infiniteAmmo,
 } from './lib/dev.js';
 
-// let the loading card paint before the big map is built
-await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 30)));
+// ---------- loading screen progress ----------
+const _load = (pct, msg) => {
+  try { if (window.__riftLoad) window.__riftLoad(pct, msg); } catch (_) {}
+};
+const _yield = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+async function _step(pct, msg) {
+  _load(pct, msg);
+  await _yield();
+}
+_load(6, 'Parsing modules…');
+await _yield();
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('c');
@@ -86,10 +95,15 @@ canvas.addEventListener('webglcontextlost', (e) => {
   } catch (_) {}
 }, false);
 
+await _step(18, 'Preparing renderer…');
+await _step(28, 'Generating textures…');
 const tex = createTextures({ res: settings.texRes, aniso: Math.min(settings.aniso, renderer.capabilities.getMaxAnisotropy()) });
+await _step(34, 'Initializing audio…');
 const audio = createAudio(settings);
 audio.setVolume(settings.volume);
+await _step(42, 'Building world geometry…');
 const world = createWorld(renderer, tex);
+await _step(52, 'Mapping radar & points of interest…');
 const radar = createRadar(world.pois);
 const scene = world.scene;
 const camera = new THREE.PerspectiveCamera(settings.fov, innerWidth / innerHeight, 0.05, 400);
@@ -107,18 +121,24 @@ const vmCamera = new THREE.PerspectiveCamera(58, innerWidth / innerHeight, 0.01,
 
 const hud = createHud();
 
+await _step(58, 'Spawning vehicles…');
 const vehicles = createVehicles({ scene, audio, hud });
+await _step(64, 'Loading scout drone systems…');
 const drone = createDrone({ scene, hud, isTouch });
+await _step(68, 'Loading utility systems…');
 const lottery = createLottery({ scene, hud, audio, camera });
 const match = createMatch();
+await _step(72, 'Warming up weapons systems…');
 const bullets = createBulletSystem(scene, tex, {
   onLand: (kind, x, y, z) => audio.play(kind === 'mag' ? 'magDrop' : 'shell', x, z),
   onWhiz: () => audio.play('whiz'),
 });
 
+await _step(78, 'Drawing operators & hands…');
 const playerMesh = makeHumanoid(tex, 'player', look);
 playerMesh.visible = false;
 scene.add(playerMesh);
+await _step(82, 'Assembling first-person viewmodel…');
 const viewmodel = makeViewmodel(tex);
 viewmodel.visible = false;
 vmScene.add(viewmodel);
@@ -405,6 +425,7 @@ build = createBuild(scene, tex, {
 });
 
 // ---------- lobby ----------
+await _step(88, 'Constructing lobby…');
 const lobby = createLobby(scene, tex, {
   onEquip: () => { ctrl.refreshLoadout(); refreshSlotsUI(); audio.play('click'); },
   onRangeHit: (bull) => { audio.play(bull ? 'headshot' : 'hit'); hud.hitMarker(bull ? 'head' : 'hit'); },
@@ -506,6 +527,7 @@ function onBuildTier() {
   hud.setMsg(ctrl.buildTier(), 700);
 }
 
+await _step(93, 'Binding controls & combat…');
 ctrl = createPlayerController({
   scene, camera, playerMesh, viewmodel, player, input, bullets, hud, audio, build, world, net, drone, lottery,
   getEnemies: () => (where === 'bots' ? enemies : []),
@@ -1037,9 +1059,12 @@ initMenus({
 applyLayout();
 
 // ---------- boot ----------
+await _step(97, 'Finalizing session…');
 refreshSlotsUI();
 enterLobby();
 hud.update(player);
+await _step(100, 'Ready');
+try { if (window.__riftLoadDone) window.__riftLoadDone(); } catch (_) {}
 btnStart.disabled = false;
 btnStart.textContent = 'Enter lobby';
 requestAnimationFrame(frame);
