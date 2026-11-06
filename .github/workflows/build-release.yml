@@ -226,7 +226,7 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build release notes from real changes
+      - name: Build short changelog
         if: steps.debounce.outputs.skip != 'true'
         id: notes
         env:
@@ -236,70 +236,39 @@ jobs:
           TAG="v${{ env.APP_VERSION }}-build.${{ github.run_number }}"
           PREV=$(gh api "repos/${{ github.repository }}/releases?per_page=1" --jq '.[0].tag_name // empty' 2>/dev/null || true)
 
-          # GitHub's own changelog (same engine as the "Generate release notes" button)
-          if [ -n "$PREV" ]; then
-            NOTES=$(gh api \
-              --method POST \
-              "repos/${{ github.repository }}/releases/generate-notes" \
-              -f tag_name="$TAG" \
-              -f target_commitish="${{ github.sha }}" \
-              -f previous_tag_name="$PREV" \
-              --jq '.body' 2>/dev/null || true)
-          else
-            NOTES=$(gh api \
-              --method POST \
-              "repos/${{ github.repository }}/releases/generate-notes" \
-              -f tag_name="$TAG" \
-              -f target_commitish="${{ github.sha }}" \
-              --jq '.body' 2>/dev/null || true)
-          fi
+          {
+            echo "### Changelog"
+            echo ""
+            if [ -n "$PREV" ] && git rev-parse "$PREV" >/dev/null 2>&1; then
+              # Only commits after the last release, max 12 lines
+              COUNT=$(git rev-list --count "${PREV}..HEAD" 2>/dev/null || echo 0)
+              echo "Since \`$PREV\` (${COUNT} commits):"
+              echo ""
+              git log --oneline --no-merges "${PREV}..HEAD" | head -12 | while read -r line; do
+                echo "- $line"
+              done
+              EXTRA=$(( COUNT > 12 ? COUNT - 12 : 0 ))
+              if [ "$EXTRA" -gt 0 ]; then
+                echo "- …and ${EXTRA} more"
+              fi
+            else
+              echo "Recent commits:"
+              echo ""
+              git log --oneline --no-merges -8 | while read -r line; do
+                echo "- $line"
+              done
+            fi
+            echo ""
+            echo "---"
+            echo ""
+            echo "**${{ github.ref_name }}** · \`${{ github.sha }}\`"
+            echo ""
+            echo "- **Windows:** portable \`.exe\`"
+            echo "- **Android:** debug \`.apk\` (sideload)"
+          } > /tmp/body.md
 
-          # Extra: file-level diff since previous tag (or last 15 commits)
-          echo "## What changed" > /tmp/body.md
-          echo "" >> /tmp/body.md
-          if [ -n "$PREV" ] && git rev-parse "$PREV" >/dev/null 2>&1; then
-            echo "Compared to \`$PREV\`:" >> /tmp/body.md
-            echo "" >> /tmp/body.md
-            echo '```' >> /tmp/body.md
-            git log --oneline "${PREV}..HEAD" | head -40 >> /tmp/body.md || true
-            echo '```' >> /tmp/body.md
-            echo "" >> /tmp/body.md
-            echo "### Files touched" >> /tmp/body.md
-            echo "" >> /tmp/body.md
-            echo '```' >> /tmp/body.md
-            git diff --name-status "${PREV}..HEAD" | head -80 >> /tmp/body.md || true
-            echo '```' >> /tmp/body.md
-          else
-            echo "Recent commits:" >> /tmp/body.md
-            echo "" >> /tmp/body.md
-            echo '```' >> /tmp/body.md
-            git log --oneline -20 | head -20 >> /tmp/body.md
-            echo '```' >> /tmp/body.md
-          fi
-
-          echo "" >> /tmp/body.md
-          if [ -n "$NOTES" ]; then
-            echo "$NOTES" >> /tmp/body.md
-            echo "" >> /tmp/body.md
-          fi
-
-          cat >> /tmp/body.md << END
-
-          ---
-
-          **Branch:** \`${{ github.ref_name }}\` · **Commit:** \`${{ github.sha }}\`
-
-          ### Downloads
-          - **Windows:** portable \`.exe\` (no installer) — needs internet once for Three.js CDN
-          - **Android:** debug \`.apk\` — enable “Install unknown apps” to sideload
-
-          Web version stays on your Pages host.
-          END
-
-          # Expose path for the release action
           echo "path=/tmp/body.md" >> "$GITHUB_OUTPUT"
-          echo "----- release body preview -----"
-          head -60 /tmp/body.md
+          cat /tmp/body.md
 
       - name: Create release
         if: steps.debounce.outputs.skip != 'true'
