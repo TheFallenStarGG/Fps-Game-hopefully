@@ -3,9 +3,17 @@
   "appName": "Rift Horizon",
   "webDir": "www",
   "android": {
-    "allowMixedContent": true
+    "allowMixedContent": true,
+    "backgroundColor": "#0a0c10"
   },
   "server": {
     "androidScheme": "https"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchAutoHide": true,
+      "backgroundColor": "#0a0c10",
+      "showSpinner": false
+    }
   }
 }
