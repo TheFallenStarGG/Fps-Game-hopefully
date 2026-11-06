@@ -45,9 +45,7 @@ if build_file.exists():
         raise SystemExit(f"No buildTypes block found in {build_file}")
 PY
 
-# build-release.yml uses Pillow to normalize the launcher icons. Install the
-# distro package so the runner's system Python can import PIL without relying
-# on pip's behavior for externally-managed Python environments.
+# build-release.yml uses Pillow to normalize the launcher icons and splash image.
 if ! python3 -c 'from PIL import Image' >/dev/null 2>&1; then
   sudo apt-get update
   sudo apt-get install -y python3-pil
@@ -83,12 +81,22 @@ cat > "$STYLES" << 'XML'
 </resources>
 XML
 
-# Splash uses og.png if present
+# Android's resource compiler rejects some source PNG encodings. Normalize the
+# optional Open Graph image into a small, baseline-compatible PNG before use.
 if [ -f "$ROOT/og.png" ] || [ -f "$ROOT/www/og.png" ]; then
   SRC="$ROOT/og.png"
   [ -f "$ROOT/www/og.png" ] && SRC="$ROOT/www/og.png"
   mkdir -p "$AND/app/src/main/res/drawable"
-  cp "$SRC" "$AND/app/src/main/res/drawable/splash.png"
+  python3 - "$SRC" "$AND/app/src/main/res/drawable/splash.png" <<'PY'
+from PIL import Image, ImageOps
+import sys
+
+with Image.open(sys.argv[1]) as source:
+    image = ImageOps.exif_transpose(source).convert("RGBA")
+    image.thumbnail((512, 512), Image.Resampling.LANCZOS)
+    image.save(sys.argv[2], format="PNG", optimize=True)
+print(f"Normalized splash image to {sys.argv[2]}")
+PY
 fi
 
 # MainActivity tweaks: keep screen on + back button to JS
