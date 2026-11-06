@@ -1,0 +1,56 @@
+{
+  "name": "rift-horizon",
+  "version": "0.4.0",
+  "description": "Rift Horizon desktop",
+  "main": "main.js",
+  "author": "TheFallenStarGG",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "gg.thefallenstar.rifthorizon",
+    "productName": "Rift Horizon",
+    "copyright": "Copyright © TheFallenStarGG",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "..",
+        "to": "game",
+        "filter": [
+          "**/*",
+          "!desktop{,/**/*}",
+          "!.git{,/**/*}",
+          "!.github{,/**/*}",
+          "!**/node_modules{,/**/*}",
+          "!**/*.md",
+          "!.gitignore"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "RiftHorizon-${version}-portable.exe",
+      "signAndEditExecutable": false
+    },
+    "portable": {
+      "artifactName": "RiftHorizon-${version}-portable.exe"
+    }
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  }
+}
