@@ -5,6 +5,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 AND="$ROOT/android"
 test -d "$AND"
 
+# build-release.yml uses Pillow to normalize the launcher icons. Install the
+# distro package so the runner's system Python can import PIL without relying
+# on pip's behavior for externally-managed Python environments.
+if ! python3 -c 'from PIL import Image' >/dev/null 2>&1; then
+  sudo apt-get update
+  sudo apt-get install -y python3-pil
+fi
+
 MANIFEST="$AND/app/src/main/AndroidManifest.xml"
 # Force landscape on the main activity
 if grep -q 'android:screenOrientation' "$MANIFEST"; then
