@@ -59,7 +59,9 @@ else
   sed -i 's/<activity /<activity android:screenOrientation="sensorLandscape" /' "$MANIFEST"
 fi
 
-# styles — full screen / black background
+# styles — full screen / black background. Capacitor's generated manifest
+# references AppTheme.NoActionBarLaunch, so retain that resource when
+# replacing its generated styles.
 STYLES="$AND/app/src/main/res/values/styles.xml"
 mkdir -p "$(dirname "$STYLES")"
 cat > "$STYLES" << 'XML'
@@ -78,6 +80,7 @@ cat > "$STYLES" << 'XML'
         <item name="windowNoTitle">true</item>
         <item name="android:background">#0A0C10</item>
     </style>
+    <style name="AppTheme.NoActionBarLaunch" parent="AppTheme.NoActionBar" />
 </resources>
 XML
 
