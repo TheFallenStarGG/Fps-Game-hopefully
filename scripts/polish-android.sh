@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Landscape, immersive-ish theme, keep screen on, back button → JS event.
+# Landscape, immersive-ish theme, keep screen on, back button → JS event,
+# REQUEST_INSTALL_PACKAGES + JavascriptInterface for in-app APK updates.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 AND="$ROOT/android"
@@ -59,9 +60,49 @@ else
   sed -i 's/<activity /<activity android:screenOrientation="sensorLandscape" /' "$MANIFEST"
 fi
 
-# styles — full screen / black background. Capacitor's generated manifest
-# references AppTheme.NoActionBarLaunch, so retain that resource when
-# replacing its generated styles.
+# Permission to install packages (Android 8+)
+if ! grep -q 'REQUEST_INSTALL_PACKAGES' "$MANIFEST"; then
+  sed -i 's|<application |<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />\n    <application |' "$MANIFEST"
+  echo "Added REQUEST_INSTALL_PACKAGES"
+fi
+
+# FileProvider for APK install
+if ! grep -q 'androidx.core.content.FileProvider' "$MANIFEST"; then
+  python3 - <<'PY'
+from pathlib import Path
+p = Path("android/app/src/main/AndroidManifest.xml")
+t = p.read_text()
+provider = '''
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+'''
+if "</application>" in t and "fileprovider" not in t.lower():
+    t = t.replace("</application>", provider + "\n    </application>", 1)
+    p.write_text(t)
+    print("Added FileProvider to manifest")
+PY
+fi
+
+# file_paths.xml
+XMLDIR="$AND/app/src/main/res/xml"
+mkdir -p "$XMLDIR"
+cat > "$XMLDIR/file_paths.xml" << 'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <cache-path name="apk_cache" path="." />
+    <external-cache-path name="apk_ext_cache" path="." />
+    <files-path name="apk_files" path="." />
+</paths>
+XML
+
+# styles — full screen / black background.
 STYLES="$AND/app/src/main/res/values/styles.xml"
 mkdir -p "$(dirname "$STYLES")"
 cat > "$STYLES" << 'XML'
@@ -84,8 +125,7 @@ cat > "$STYLES" << 'XML'
 </resources>
 XML
 
-# Android's resource compiler rejects some source PNG encodings. Normalize the
-# optional Open Graph image into a small, baseline-compatible PNG before use.
+# Android's resource compiler rejects some source PNG encodings.
 if [ -f "$ROOT/og.png" ] || [ -f "$ROOT/www/og.png" ]; then
   SRC="$ROOT/og.png"
   [ -f "$ROOT/www/og.png" ] && SRC="$ROOT/www/og.png"
@@ -102,19 +142,36 @@ print(f"Normalized splash image to {sys.argv[2]}")
 PY
 fi
 
-# MainActivity tweaks: keep screen on + back button to JS
+# MainActivity tweaks: keep screen on + back button to JS + APK install bridge
 MAIN=$(find "$AND/app/src/main/java" -name 'MainActivity.java' | head -1)
 if [ -n "$MAIN" ] && [ -f "$MAIN" ]; then
-  if ! grep -q 'keepScreenOn' "$MAIN"; then
-    # Insert after onCreate setContent / bridge load — simple append of methods before last }
-    python3 - << PY
+  python3 - << PY
 from pathlib import Path
 p = Path("$MAIN")
 t = p.read_text()
+
+# imports
+for imp in [
+    "import android.view.WindowManager;",
+    "import android.webkit.WebView;",
+    "import android.webkit.JavascriptInterface;",
+    "import android.util.Base64;",
+    "import android.content.Intent;",
+    "import android.net.Uri;",
+    "import android.os.Build;",
+    "import androidx.core.content.FileProvider;",
+    "import java.io.File;",
+    "import java.io.FileOutputStream;",
+]:
+    if imp not in t:
+        # insert after package line's first import block
+        if "import " in t:
+            t = t.replace("import ", imp + "\nimport ", 1)
+        else:
+            t = imp + "\n" + t
+
+# keep screen on
 if "FLAG_KEEP_SCREEN_ON" not in t:
-    if "import android.view.WindowManager" not in t:
-        t = t.replace("import ", "import android.view.WindowManager;\nimport android.webkit.WebView;\nimport ", 1)
-    # after super.onCreate
     needle = "super.onCreate(savedInstanceState);"
     inject = """super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -128,10 +185,93 @@ if "FLAG_KEEP_SCREEN_ON" not in t:
         );"""
     if needle in t:
         t = t.replace(needle, inject, 1)
+
+# bridge registration after load / onCreate — append helper methods before final }
+if "__riftInstallApk" not in t and "installApkBase64" not in t:
+    bridge = r'''
+    private void attachRiftBridge() {
+        try {
+            WebView web = (WebView) this.bridge.getWebView();
+            if (web == null) return;
+            web.getSettings().setJavaScriptEnabled(true);
+            web.addJavascriptInterface(new Object() {
+                @JavascriptInterface
+                public boolean installApkBase64(String b64, String fileName) {
+                    try {
+                        if (b64 == null || b64.length() == 0) return false;
+                        byte[] data = Base64.decode(b64, Base64.DEFAULT);
+                        File dir = getCacheDir();
+                        String name = (fileName == null || fileName.length() == 0) ? "rift-update.apk" : fileName;
+                        if (!name.endsWith(".apk")) name = name + ".apk";
+                        File out = new File(dir, name);
+                        FileOutputStream fos = new FileOutputStream(out);
+                        fos.write(data);
+                        fos.close();
+                        Uri uri;
+                        if (Build.VERSION.SDK_INT >= 24) {
+                            uri = FileProvider.getUriForFile(
+                                MainActivity.this,
+                                getPackageName() + ".fileprovider",
+                                out
+                            );
+                        } else {
+                            uri = Uri.fromFile(out);
+                        }
+                        Intent intent = new Intent(Intent.ACTION_VIEW);
+                        intent.setDataAndType(uri, "application/vnd.android.package-archive");
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        startActivity(intent);
+                        return true;
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        return false;
+                    }
+                }
+            }, "Android");
+            // Also expose a pure-JS callable that the web layer looks for
+            web.evaluateJavascript(
+                "(function(){try{window.__riftInstallApk=function(b64,name){try{return !!(window.Android&&window.Android.installApkBase64(b64,name||'rift-update.apk'));}catch(e){return false;}}; }catch(e){}})();",
+                null
+            );
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+        attachRiftBridge();
+    }
+'''
+    # onBackPressed if missing
+    if "onBackPressed" not in t:
+        bridge += r'''
+    @Override
+    public void onBackPressed() {
+        WebView web = (WebView) this.bridge.getWebView();
+        if (web != null) {
+            web.evaluateJavascript(
+                "(function(){try{if(window.__riftNativeBack){window.__riftNativeBack();return;}var p=document.getElementById('panel');if(p){p.classList.add('on');}}catch(e){}})();",
+                null
+            );
+            return;
+        }
+        super.onBackPressed();
+    }
+'''
+    t = t.rstrip()
+    if t.endswith("}"):
+        t = t[:-1] + bridge + "\n}\n"
+    p.write_text(t)
+    print("Patched MainActivity with APK install bridge:", p)
+else:
+    # already has bridge? still ensure onBackPressed
     if "onBackPressed" not in t:
         t = t.rstrip()
         if t.endswith("}"):
-            t = t[:-1] + """
+            t = t[:-1] + r'''
     @Override
     public void onBackPressed() {
         WebView web = (WebView) this.bridge.getWebView();
@@ -145,11 +285,16 @@ if "FLAG_KEEP_SCREEN_ON" not in t:
         super.onBackPressed();
     }
 }
-"""
-    p.write_text(t)
-    print("Patched MainActivity:", p)
-PY
-  fi
+'''
+            p.write_text(t)
+            print("Patched MainActivity onBackPressed:", p)
+
+  # also call attach after onCreate if present
+  if "attachRiftBridge" in p.read_text() and "attachRiftBridge();" not in p.read_text().split("onCreate")[1][:800] if "onCreate" in p.read_text() else True:
+    tt = p.read_text()
+    if "attachRiftBridge();" not in tt:
+      # inject at end of onCreate is hard; onStart handles it
+      pass
 fi
 
 echo "Android polish applied"
