@@ -29,7 +29,7 @@ import { look, applyLook, decodeLook } from './lib/look.js';
 import { canon } from './lib/keybinds.js';
 import { createGfx } from './lib/gfx.js';
 import { createDropship } from './lib/dropship.js';
-import { initUpdater, isForcedOffline, checkForUpdate, showUpdateModal, refreshOfflineBanner } from './lib/update.js';
+import { initUpdater, isForcedOffline, checkForUpdate, showUpdateModal, refreshOfflineBanner, isWebClient } from './lib/update.js';
 import {
   devUnlocked, tryUnlock, checkCallsign, bindDev, mountDevSettingsSection,
   installErrorOverlay, refreshDevUI, showBar, hideBar, setFly,
@@ -643,7 +643,7 @@ function refreshSlotsUI() {
 const GLOBAL_LOBBY_ROOM = 'global-lobby';
 function joinGlobalLobby() {
   if (WORKER_URL.includes('YOUR_SUBDOMAIN')) return;
-  if (forceOffline || isForcedOffline()) return; // offline lock: no lobby presence either
+  if (!isWebClient() && (forceOffline || isForcedOffline())) return; // native offline lock only
   net.connect(GLOBAL_LOBBY_ROOM, myName, 'lobby', loadoutString());
 }
 
@@ -738,7 +738,7 @@ async function startBots() {
 
 async function startOnline(modeId) {
   if (joining) return;
-  if (forceOffline || isForcedOffline()) {
+  if (!isWebClient() && (forceOffline || isForcedOffline())) {
     hud.setMsg('Update required for multiplayer — open the update prompt', 3200);
     try {
       const info = await checkForUpdate({ force: true });
@@ -1086,13 +1086,15 @@ btnStart.textContent = 'Enter lobby';
 try {
   updater = await initUpdater({
     onLockChange: (forced) => {
+      if (isWebClient()) { forceOffline = false; return; }
       forceOffline = !!forced;
       if (forced && where === 'multi') enterLobby('Update required — offline mode');
     },
   });
-  forceOffline = !!(updater && updater.forcedOffline && updater.forcedOffline());
+  forceOffline = isWebClient() ? false : !!(updater && updater.forcedOffline && updater.forcedOffline());
 } catch (e) {
   console.warn('[update] init failed', e);
+  forceOffline = false;
 }
 
 requestAnimationFrame(frame);
