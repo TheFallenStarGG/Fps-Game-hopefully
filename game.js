@@ -29,6 +29,7 @@ import { look, applyLook, decodeLook } from './lib/look.js';
 import { canon } from './lib/keybinds.js';
 import { createGfx } from './lib/gfx.js';
 import { createDropship } from './lib/dropship.js';
+import { initUpdater, isForcedOffline, checkForUpdate, showUpdateModal, refreshOfflineBanner } from './lib/update.js';
 import {
   devUnlocked, tryUnlock, checkCallsign, bindDev, mountDevSettingsSection,
   installErrorOverlay, refreshDevUI, showBar, hideBar, setFly,
@@ -66,6 +67,8 @@ roomInput.value = store.get('rr.room', '');
 
 let where = 'lobby'; // 'lobby' | 'bots' | 'multi'
 let running = false, panelOpen = false, loadoutOpen = false, joining = false;
+let forceOffline = false;
+let updater = null;
 let myName = 'Player', last = performance.now(), fpsT = 0, fpsN = 0, listT = 0;
 const chatFocused = () => document.activeElement === chatInput;
 const lockPointer = () => { if (!isTouch) { try { canvas.requestPointerLock(); } catch (_) {} } };
@@ -640,6 +643,7 @@ function refreshSlotsUI() {
 const GLOBAL_LOBBY_ROOM = 'global-lobby';
 function joinGlobalLobby() {
   if (WORKER_URL.includes('YOUR_SUBDOMAIN')) return;
+  if (forceOffline || isForcedOffline()) return; // offline lock: no lobby presence either
   net.connect(GLOBAL_LOBBY_ROOM, myName, 'lobby', loadoutString());
 }
 
@@ -734,6 +738,16 @@ async function startBots() {
 
 async function startOnline(modeId) {
   if (joining) return;
+  if (forceOffline || isForcedOffline()) {
+    hud.setMsg('Update required for multiplayer — open the update prompt', 3200);
+    try {
+      const info = await checkForUpdate({ force: true });
+      if (info) await showUpdateModal(info);
+      forceOffline = isForcedOffline();
+      refreshOfflineBanner(null, info);
+    } catch (_) {}
+    return;
+  }
   if (WORKER_URL.includes('YOUR_SUBDOMAIN')) { hud.setMsg('Set WORKER_URL in lib/net.js first', 3000); return; }
   joining = true;
   const code = roomInput.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24);
@@ -1067,4 +1081,18 @@ await _step(100, 'Ready');
 try { if (window.__riftLoadDone) window.__riftLoadDone(); } catch (_) {}
 btnStart.disabled = false;
 btnStart.textContent = 'Enter lobby';
+
+// Auto-update check (GitHub Releases). Cancel → offline lock until updated.
+try {
+  updater = await initUpdater({
+    onLockChange: (forced) => {
+      forceOffline = !!forced;
+      if (forced && where === 'multi') enterLobby('Update required — offline mode');
+    },
+  });
+  forceOffline = !!(updater && updater.forcedOffline && updater.forcedOffline());
+} catch (e) {
+  console.warn('[update] init failed', e);
+}
+
 requestAnimationFrame(frame);
