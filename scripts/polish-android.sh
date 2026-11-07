@@ -1,78 +1,77 @@
 #!/usr/bin/env bash
-# Landscape, immersive-ish theme, keep screen on, back button → JS event,
-# REQUEST_INSTALL_PACKAGES + JavascriptInterface for in-app APK updates.
+# Landscape, immersive theme, keep screen on, back button → JS,
+# REQUEST_INSTALL_PACKAGES + FileProvider + JS bridge for in-app APK updates.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 AND="$ROOT/android"
 test -d "$AND"
 
-# The build workflow later adds the signing config. Put its reference in the
-# release build type (not in signingConfigs.release) before that step runs.
+# ---- signingConfig placeholder in release build type ----
 python3 - <<'PY'
 from pathlib import Path
 import re
 
 build_file = Path("android/app/build.gradle")
-if build_file.exists():
-    text = build_file.read_text()
+if not build_file.exists():
+    raise SystemExit("android/app/build.gradle missing")
 
-    def block_end(source, opening_brace):
-        depth = 0
-        for index in range(opening_brace, len(source)):
-            if source[index] == "{":
-                depth += 1
-            elif source[index] == "}":
-                depth -= 1
-                if depth == 0:
-                    return index
-        raise SystemExit(f"Unmatched '{{' in {build_file}")
+text = build_file.read_text()
 
-    build_types = re.search(r"\bbuildTypes\s*\{", text)
-    if build_types:
-        build_types_open = text.index("{", build_types.start())
-        build_types_close = block_end(text, build_types_open)
-        release = re.search(r"\brelease\s*\{", text[build_types_open + 1:build_types_close])
-        if release:
-            release_open = build_types_open + 1 + release.end() - 1
-            release_close = block_end(text, release_open)
-            release_body = text[release_open + 1:release_close]
-            if not re.search(r"\bsigningConfig\s+signingConfigs\.release\b", release_body):
-                text = text[:release_open + 1] + "\n            signingConfig signingConfigs.release" + text[release_open + 1:]
-                build_file.write_text(text)
-                print(f"Added release signingConfig to {build_file}")
-        else:
-            raise SystemExit(f"No release build type found in {build_file}")
-    else:
-        raise SystemExit(f"No buildTypes block found in {build_file}")
+def block_end(source, opening_brace):
+    depth = 0
+    for index in range(opening_brace, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return index
+    raise SystemExit(f"Unmatched '{{' in {build_file}")
+
+build_types = re.search(r"\bbuildTypes\s*\{", text)
+if not build_types:
+    raise SystemExit(f"No buildTypes block found in {build_file}")
+build_types_open = text.index("{", build_types.start())
+build_types_close = block_end(text, build_types_open)
+release = re.search(r"\brelease\s*\{", text[build_types_open + 1:build_types_close])
+if not release:
+    raise SystemExit(f"No release build type found in {build_file}")
+release_open = build_types_open + 1 + release.end() - 1
+release_close = block_end(text, release_open)
+release_body = text[release_open + 1:release_close]
+if not re.search(r"\bsigningConfig\s+signingConfigs\.release\b", release_body):
+    text = text[:release_open + 1] + "\n            signingConfig signingConfigs.release" + text[release_open + 1:]
+    build_file.write_text(text)
+    print(f"Added release signingConfig to {build_file}")
 PY
 
-# build-release.yml uses Pillow to normalize the launcher icons and splash image.
 if ! python3 -c 'from PIL import Image' >/dev/null 2>&1; then
   sudo apt-get update
   sudo apt-get install -y python3-pil
 fi
 
 MANIFEST="$AND/app/src/main/AndroidManifest.xml"
-# Force landscape on the main activity
+
+# Force landscape
 if grep -q 'android:screenOrientation' "$MANIFEST"; then
   sed -i 's/android:screenOrientation="[^"]*"/android:screenOrientation="sensorLandscape"/' "$MANIFEST"
 else
   sed -i 's/<activity /<activity android:screenOrientation="sensorLandscape" /' "$MANIFEST"
 fi
 
-# Permission to install packages (Android 8+)
+# REQUEST_INSTALL_PACKAGES
 if ! grep -q 'REQUEST_INSTALL_PACKAGES' "$MANIFEST"; then
   sed -i 's|<application |<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />\n    <application |' "$MANIFEST"
   echo "Added REQUEST_INSTALL_PACKAGES"
 fi
 
 # FileProvider for APK install
-if ! grep -q 'androidx.core.content.FileProvider' "$MANIFEST"; then
+if ! grep -qi 'fileprovider' "$MANIFEST"; then
   python3 - <<'PY'
 from pathlib import Path
 p = Path("android/app/src/main/AndroidManifest.xml")
 t = p.read_text()
-provider = '''
+provider = """
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -82,15 +81,14 @@ provider = '''
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
-'''
-if "</application>" in t and "fileprovider" not in t.lower():
+"""
+if "</application>" in t:
     t = t.replace("</application>", provider + "\n    </application>", 1)
     p.write_text(t)
     print("Added FileProvider to manifest")
 PY
 fi
 
-# file_paths.xml
 XMLDIR="$AND/app/src/main/res/xml"
 mkdir -p "$XMLDIR"
 cat > "$XMLDIR/file_paths.xml" << 'XML'
@@ -102,7 +100,7 @@ cat > "$XMLDIR/file_paths.xml" << 'XML'
 </paths>
 XML
 
-# styles — full screen / black background.
+# styles
 STYLES="$AND/app/src/main/res/values/styles.xml"
 mkdir -p "$(dirname "$STYLES")"
 cat > "$STYLES" << 'XML'
@@ -125,7 +123,7 @@ cat > "$STYLES" << 'XML'
 </resources>
 XML
 
-# Android's resource compiler rejects some source PNG encodings.
+# splash
 if [ -f "$ROOT/og.png" ] || [ -f "$ROOT/www/og.png" ]; then
   SRC="$ROOT/og.png"
   [ -f "$ROOT/www/og.png" ] && SRC="$ROOT/www/og.png"
@@ -133,7 +131,6 @@ if [ -f "$ROOT/og.png" ] || [ -f "$ROOT/www/og.png" ]; then
   python3 - "$SRC" "$AND/app/src/main/res/drawable/splash.png" <<'PY'
 from PIL import Image, ImageOps
 import sys
-
 with Image.open(sys.argv[1]) as source:
     image = ImageOps.exif_transpose(source).convert("RGBA")
     image.thumbnail((512, 512), Image.Resampling.LANCZOS)
@@ -142,16 +139,17 @@ print(f"Normalized splash image to {sys.argv[2]}")
 PY
 fi
 
-# MainActivity tweaks: keep screen on + back button to JS + APK install bridge
+# MainActivity: keep-screen-on, back button, APK install bridge
 MAIN=$(find "$AND/app/src/main/java" -name 'MainActivity.java' | head -1)
 if [ -n "$MAIN" ] && [ -f "$MAIN" ]; then
-  python3 - << PY
+  python3 - "$MAIN" <<'PY'
+import sys
 from pathlib import Path
-p = Path("$MAIN")
+
+p = Path(sys.argv[1])
 t = p.read_text()
 
-# imports
-for imp in [
+imports = [
     "import android.view.WindowManager;",
     "import android.webkit.WebView;",
     "import android.webkit.JavascriptInterface;",
@@ -162,33 +160,39 @@ for imp in [
     "import androidx.core.content.FileProvider;",
     "import java.io.File;",
     "import java.io.FileOutputStream;",
-]:
+]
+for imp in imports:
     if imp not in t:
-        # insert after package line's first import block
         if "import " in t:
             t = t.replace("import ", imp + "\nimport ", 1)
         else:
             t = imp + "\n" + t
 
-# keep screen on
 if "FLAG_KEEP_SCREEN_ON" not in t:
     needle = "super.onCreate(savedInstanceState);"
-    inject = """super.onCreate(savedInstanceState);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        getWindow().getDecorView().setSystemUiVisibility(
-            android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-            | android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
-            | android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-            | android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            | android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-            | android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-        );"""
+    inject = (
+        "super.onCreate(savedInstanceState);\n"
+        "        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);\n"
+        "        getWindow().getDecorView().setSystemUiVisibility(\n"
+        "            android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY\n"
+        "            | android.view.View.SYSTEM_UI_FLAG_FULLSCREEN\n"
+        "            | android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION\n"
+        "            | android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE\n"
+        "            | android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN\n"
+        "            | android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION\n"
+        "        );"
+    )
     if needle in t:
         t = t.replace(needle, inject, 1)
 
-# bridge registration after load / onCreate — append helper methods before final }
-if "__riftInstallApk" not in t and "installApkBase64" not in t:
-    bridge = r'''
+if "installApkBase64" not in t:
+    # Strip final closing brace of the class, append methods, re-close
+    t = t.rstrip()
+    if not t.endswith("}"):
+        raise SystemExit("MainActivity.java does not end with }")
+    t = t[:-1]
+
+    methods = r'''
     private void attachRiftBridge() {
         try {
             WebView web = (WebView) this.bridge.getWebView();
@@ -229,7 +233,6 @@ if "__riftInstallApk" not in t and "installApkBase64" not in t:
                     }
                 }
             }, "Android");
-            // Also expose a pure-JS callable that the web layer looks for
             web.evaluateJavascript(
                 "(function(){try{window.__riftInstallApk=function(b64,name){try{return !!(window.Android&&window.Android.installApkBase64(b64,name||'rift-update.apk'));}catch(e){return false;}}; }catch(e){}})();",
                 null
@@ -245,9 +248,8 @@ if "__riftInstallApk" not in t and "installApkBase64" not in t:
         attachRiftBridge();
     }
 '''
-    # onBackPressed if missing
     if "onBackPressed" not in t:
-        bridge += r'''
+        methods += r'''
     @Override
     public void onBackPressed() {
         WebView web = (WebView) this.bridge.getWebView();
@@ -261,13 +263,11 @@ if "__riftInstallApk" not in t and "installApkBase64" not in t:
         super.onBackPressed();
     }
 '''
-    t = t.rstrip()
-    if t.endswith("}"):
-        t = t[:-1] + bridge + "\n}\n"
+    t = t + methods + "\n}\n"
     p.write_text(t)
-    print("Patched MainActivity with APK install bridge:", p)
+    print("Patched MainActivity:", p)
 else:
-    # already has bridge? still ensure onBackPressed
+    # already has install bridge; ensure onBackPressed
     if "onBackPressed" not in t:
         t = t.rstrip()
         if t.endswith("}"):
@@ -289,12 +289,8 @@ else:
             p.write_text(t)
             print("Patched MainActivity onBackPressed:", p)
 
-  # also call attach after onCreate if present
-  if "attachRiftBridge" in p.read_text() and "attachRiftBridge();" not in p.read_text().split("onCreate")[1][:800] if "onCreate" in p.read_text() else True:
-    tt = p.read_text()
-    if "attachRiftBridge();" not in tt:
-      # inject at end of onCreate is hard; onStart handles it
-      pass
+print("Android polish applied")
+PY
 fi
 
 echo "Android polish applied"
